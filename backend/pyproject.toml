@@ -1,0 +1,22 @@
+[project]
+name = "travel-split-backend"
+version = "0.1.0"
+description = "FastAPI backend for travel split billing"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic",
+    "fastapi",
+    "httpx",
+    "hypothesis",
+    "mypy",
+    "pydantic",
+    "pymysql",
+    "pytest",
+    "ruff",
+    "sqlalchemy",
+    "uvicorn",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["alembic*", "tests*"]
