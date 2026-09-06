@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="980" viewBox="0 0 1440 980" role="img" aria-labelledby="title desc">
+  <title id="title">旅行自动分账小程序低保真原型</title>
+  <desc id="desc">旅行账本、消费确认和结算分享三张手机页面的线框图。</desc>
+  <style>
+    .bg { fill:#f5f6f8; }
+    .phone { fill:#fff; stroke:#253042; stroke-width:3; }
+    .bar { fill:#253042; }
+    .card { fill:#fff; stroke:#d8dde6; stroke-width:2; }
+    .muted { fill:#697386; font: 18px Arial, 'Microsoft YaHei', sans-serif; }
+    .label { fill:#172033; font: 24px Arial, 'Microsoft YaHei', sans-serif; font-weight:700; }
+    .body { fill:#253042; font: 18px Arial, 'Microsoft YaHei', sans-serif; }
+    .small { fill:#697386; font: 15px Arial, 'Microsoft YaHei', sans-serif; }
+    .accent { fill:#246bfd; }
+    .accentText { fill:#fff; font: 18px Arial, 'Microsoft YaHei', sans-serif; font-weight:700; }
+    .line { stroke:#d8dde6; stroke-width:2; }
+    .tag { fill:#e9f0ff; }
+  </style>
+  <rect class="bg" width="1440" height="980"/>
+  <text x="720" y="58" text-anchor="middle" class="label" font-size="32">旅行自动分账 · 简易原型</text>
+  <text x="720" y="88" text-anchor="middle" class="muted">付款人单人操作 → 核对 → 自动结算 → 分享结果</text>
+
+  <!-- Screen 1 -->
+  <rect class="phone" x="100" y="130" rx="34" width="360" height="760"/>
+  <rect class="bar" x="100" y="130" rx="31" width="360" height="64"/>
+  <text x="280" y="171" text-anchor="middle" class="accentText">2026 日本关西</text>
+  <text x="130" y="230" class="label">旅行账本</text>
+  <text x="130" y="260" class="muted">默认结算币种：人民币 (CNY)</text>
+  <rect class="card" x="124" y="287" rx="16" width="312" height="105"/>
+  <text x="145" y="321" class="body">同行人  你 · 小林 · 阿乐</text>
+  <text x="145" y="355" class="muted">3 人 · 8 笔消费</text>
+  <rect class="tag" x="320" y="330" rx="12" width="90" height="34"/>
+  <text x="365" y="353" text-anchor="middle" class="body" font-size="15">查看结算</text>
+  <text x="130" y="440" class="label">近期消费</text>
+  <rect class="card" x="124" y="460" rx="14" width="312" height="90"/>
+  <text x="145" y="494" class="body">唐吉诃德 · ¥12,480</text>
+  <text x="145" y="524" class="small">你付款 · ¥580.26 CNY · 待核对</text>
+  <rect class="card" x="124" y="565" rx="14" width="312" height="90"/>
+  <text x="145" y="599" class="body">晚餐 · ₩68,000</text>
+  <text x="145" y="629" class="small">小林付款 · 3 人共享 · 已完成</text>
+  <rect class="accent" x="124" y="795" rx="22" width="312" height="58"/>
+  <text x="280" y="832" text-anchor="middle" class="accentText">+ 拍小票 / 手动记一笔</text>
+
+  <!-- Arrow -->
+  <path d="M480 510 H535" fill="none" stroke="#246bfd" stroke-width="4"/>
+  <path d="M535 510 l-14 -10 v20 z" fill="#246bfd"/>
+
+  <!-- Screen 2 -->
+  <rect class="phone" x="540" y="130" rx="34" width="360" height="760"/>
+  <rect class="bar" x="540" y="130" rx="31" width="360" height="64"/>
+  <text x="720" y="171" text-anchor="middle" class="accentText">确认消费明细</text>
+  <text x="570" y="230" class="body">唐吉诃德 · 2026/08/12</text>
+  <rect class="card" x="564" y="250" rx="14" width="312" height="90"/>
+  <text x="585" y="284" class="body">小票原文 + 中文翻译</text>
+  <text x="585" y="313" class="small">识别不确定字段将高亮，均可编辑</text>
+  <text x="570" y="378" class="label">商品与归属</text>
+  <rect class="card" x="564" y="395" rx="14" width="312" height="134"/>
+  <text x="585" y="428" class="body">药妆 A　¥2,980　小林</text>
+  <line class="line" x1="585" y1="445" x2="855" y2="445"/>
+  <text x="585" y="476" class="body">零食 B　¥1,280　你</text>
+  <text x="585" y="507" class="small">+ 新增商品　|　共享：均分 / 比例</text>
+  <rect class="card" x="564" y="548" rx="14" width="312" height="154"/>
+  <text x="585" y="582" class="body">付款与调整</text>
+  <text x="585" y="614" class="small">付款人：你　实际扣款：¥580.26 CNY</text>
+  <text x="585" y="644" class="small">优惠：整单按占比分摊　税费：已识别</text>
+  <text x="585" y="675" class="small">汇率：实际扣款优先，可手动覆盖</text>
+  <rect class="accent" x="564" y="795" rx="22" width="312" height="58"/>
+  <text x="720" y="832" text-anchor="middle" class="accentText">保存并重新计算</text>
+
+  <!-- Arrow -->
+  <path d="M920 510 H975" fill="none" stroke="#246bfd" stroke-width="4"/>
+  <path d="M975 510 l-14 -10 v20 z" fill="#246bfd"/>
+
+  <!-- Screen 3 -->
+  <rect class="phone" x="980" y="130" rx="34" width="360" height="760"/>
+  <rect class="bar" x="980" y="130" rx="31" width="360" height="64"/>
+  <text x="1160" y="171" text-anchor="middle" class="accentText">结算结果 · CNY</text>
+  <text x="1010" y="230" class="label">最少转账建议</text>
+  <rect class="card" x="1004" y="250" rx="14" width="312" height="118"/>
+  <text x="1025" y="285" class="body">小林  →  你</text>
+  <text x="1025" y="327" class="label" font-size="30">¥ 168.42</text>
+  <text x="1025" y="350" class="small">含购物、晚餐与退税分配</text>
+  <rect class="card" x="1004" y="386" rx="14" width="312" height="92"/>
+  <text x="1025" y="421" class="body">阿乐  →  小林　¥ 52.10</text>
+  <text x="1025" y="451" class="small">查看来源明细 ›</text>
+  <text x="1010" y="537" class="label">发布与分享</text>
+  <rect class="card" x="1004" y="557" rx="14" width="312" height="116"/>
+  <text x="1025" y="591" class="body">版本 V3 · 刚刚更新</text>
+  <text x="1025" y="622" class="small">链接默认显示最新已发布版本</text>
+  <text x="1025" y="650" class="small">有效期：7 天　|　小票图：不附带</text>
+  <rect class="accent" x="1004" y="710" rx="22" width="150" height="58"/>
+  <text x="1079" y="747" text-anchor="middle" class="accentText">生成长图</text>
+  <rect class="accent" x="1166" y="710" rx="22" width="150" height="58"/>
+  <text x="1241" y="747" text-anchor="middle" class="accentText">发布链接</text>
+  <text x="1160" y="840" text-anchor="middle" class="small">分享页：原文 + 中文翻译 + 分摊说明</text>
+</svg>

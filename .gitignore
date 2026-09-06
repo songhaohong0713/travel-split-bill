@@ -1,0 +1,22 @@
+# Local credentials and deployment configuration
+.env
+.env.*
+!.env.example
+miniprogram/env.local.ts
+backend/.env
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+
+# Build and editor output
+node_modules/
+dist/
+.DS_Store
+
+# Isolated Git worktrees
+.worktrees/
