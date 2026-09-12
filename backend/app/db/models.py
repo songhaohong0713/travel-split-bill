@@ -70,6 +70,18 @@ class SettlementVersion(Base):
     )
 
 
+class ShareLink(Base):
+    __tablename__ = "share_links"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+
+
 class ExpenseRecord(Base):
     __tablename__ = "expenses"
 
