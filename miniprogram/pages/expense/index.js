@@ -2,7 +2,8 @@ const { previewSettlement } = require("../../services/api")
 Page({
   data: { tripId: "", currency: "CNY", amount: "", payer: "我", friend: "", allocationIndex: 0, allocationLabels: ["付款人自己买", "同行人自己买", "两人均分"], receiptPath: "" },
   onLoad(q) { this.setData({ tripId: q.tripId, currency: q.currency }) },
-  chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath }); wx.showToast({ title: "已选择，等待上传识别", icon: "none" }) } }) }) },\n  onAmount(e) { this.setData({ amount: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onAllocation(e) { this.setData({ allocationIndex: Number(e.detail.value) }) },
+  chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath }); wx.showToast({ title: "已选择，等待上传识别", icon: "none" }) } }) }) },
+  onAmount(e) { this.setData({ amount: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onAllocation(e) { this.setData({ allocationIndex: Number(e.detail.value) }) },
   preview() {
     const { tripId, currency, amount, payer, friend, allocationIndex } = this.data
     if (!amount || !payer) return wx.showToast({ title: "请填写金额和付款人", icon: "none" })
