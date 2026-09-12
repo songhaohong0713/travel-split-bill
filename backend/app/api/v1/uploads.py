@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.api.v1.trips import _not_found
-from app.db.models import Trip
+from app.db.models import ReceiptImage, ReceiptJob, Trip
 
 router = APIRouter(prefix="/v1", tags=["uploads"])
 
@@ -36,6 +36,8 @@ def create_upload(
         )
     image_id = str(uuid4())
     key = f"receipts/{user_id}/{request.trip_id}/{image_id}.jpg"
+    session.add(ReceiptImage(id=image_id, owner_id=user_id, trip_id=request.trip_id, object_key=key))
+    session.commit()
     return {
         "data": {
             "image_id": image_id,
@@ -43,3 +45,32 @@ def create_upload(
             "upload_url": f"/storage-upload/{key}",
         }
     }
+
+
+@router.post("/uploads/{image_id}/complete")
+def complete_upload(
+    image_id: str, session: DbSession, user_id: CurrentUser
+) -> dict[str, dict[str, str]]:
+    image = session.get(ReceiptImage, image_id)
+    if image is None or image.owner_id != user_id:
+        raise _not_found()
+    image.status = "uploaded"
+    session.commit()
+    return {"data": {"image_id": image.id, "status": image.status}}
+
+
+class ReceiptJobRequest(BaseModel):
+    image_id: str
+
+
+@router.post("/receipt-jobs", status_code=status.HTTP_202_ACCEPTED)
+def create_receipt_job(
+    request: ReceiptJobRequest, session: DbSession, user_id: CurrentUser
+) -> dict[str, dict[str, str]]:
+    image = session.get(ReceiptImage, request.image_id)
+    if image is None or image.owner_id != user_id or image.status != "uploaded":
+        raise _not_found()
+    job = ReceiptJob(image_id=image.id)
+    session.add(job)
+    session.commit()
+    return {"data": {"id": job.id, "status": job.status}}

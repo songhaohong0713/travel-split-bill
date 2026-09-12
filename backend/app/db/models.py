@@ -82,6 +82,24 @@ class ShareLink(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
 
 
+class ReceiptImage(Base):
+    __tablename__ = "receipt_images"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
+    object_key: Mapped[str] = mapped_column(String(255), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+
+
+class ReceiptJob(Base):
+    __tablename__ = "receipt_jobs"
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    image_id: Mapped[str] = mapped_column(ForeignKey("receipt_images.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+
+
 class ExpenseRecord(Base):
     __tablename__ = "expenses"
 
