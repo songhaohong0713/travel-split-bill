@@ -1,0 +1,60 @@
+# CloudBase Run deployment blueprint.
+# Replace image/project values during deployment. Secret values must be created
+# in CloudBase Secret Manager; do not put credentials in this file.
+version: "1.0"
+project: travel-split
+services:
+  - name: split-api
+    image: registry.example.com/travel-split:${IMAGE_TAG}
+    port: 8000
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    healthCheck:
+      path: /healthz
+      port: 8000
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    envFrom:
+      secretRef:
+        name: travel-split-secrets
+        keys:
+          - DATABASE_URL
+          - JWT_SECRET
+          - WECHAT_APP_ID
+          - WECHAT_APP_SECRET
+          - COS_SECRET_ID
+          - COS_SECRET_KEY
+          - COS_BUCKET
+          - COS_REGION
+          - TENCENTCLOUD_SECRET_ID
+          - TENCENTCLOUD_SECRET_KEY
+          - TENCENTCLOUD_REGION
+          - OCR_MAX_ATTEMPTS
+          - CORS_ORIGINS
+
+  - name: split-ocr-worker
+    image: registry.example.com/travel-split:${IMAGE_TAG}
+    command:
+      - python
+      - -m
+      - app.worker.run
+    envFrom:
+      secretRef:
+        name: travel-split-secrets
+        keys:
+          - DATABASE_URL
+          - COS_SECRET_ID
+          - COS_SECRET_KEY
+          - COS_BUCKET
+          - COS_REGION
+          - TENCENTCLOUD_SECRET_ID
+          - TENCENTCLOUD_SECRET_KEY
+          - TENCENTCLOUD_REGION
+          - OCR_MAX_ATTEMPTS
