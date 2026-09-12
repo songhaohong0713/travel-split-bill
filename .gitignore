@@ -20,3 +20,4 @@ dist/
 
 # Isolated Git worktrees
 .worktrees/
+*.egg-info/
