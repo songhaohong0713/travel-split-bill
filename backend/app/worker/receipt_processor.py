@@ -20,14 +20,16 @@ def process_next_job(
     if job is None:
         return None
     job.status = "processing"
+    job.attempts += 1
     session.flush()
     image = session.get(ReceiptImage, job.image_id)
     try:
         if image is None:
             raise RuntimeError("image missing")
-        provider.recognize(load_image(image.object_key))
+        job.candidates_json = provider.recognize(load_image(image.object_key))
         job.status = "needs_review"
     except (OSError, RuntimeError, ValueError):
-        job.status = "failed"
+        job.error_code = "OCR_FAILED"
+        job.status = "queued" if job.attempts < 3 else "failed"
     session.commit()
     return job

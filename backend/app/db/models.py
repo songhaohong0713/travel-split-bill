@@ -93,11 +93,15 @@ class ReceiptImage(Base):
 
 class ReceiptJob(Base):
     __tablename__ = "receipt_jobs"
+
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid4())
     )
     image_id: Mapped[str] = mapped_column(ForeignKey("receipt_images.id"), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    candidates_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 
 class ExpenseRecord(Base):

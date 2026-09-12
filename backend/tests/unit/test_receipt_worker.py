@@ -27,6 +27,7 @@ def test_worker_marks_successful_job_needs_review(session) -> None:
     job = process_next_job(session, FakeOcr(), lambda _: b"image")
     assert job is not None
     assert job.status == "needs_review"
+    assert job.candidates_json == ["お茶 120", "合計 120"]
 
 
 def test_worker_marks_provider_failure_failed(session) -> None:
@@ -43,4 +44,5 @@ def test_worker_marks_provider_failure_failed(session) -> None:
     session.commit()
     job = process_next_job(session, FailingOcr(), lambda _: b"image")
     assert job is not None
-    assert job.status == "failed"
+    assert job.status == "queued"
+    assert job.attempts == 1
