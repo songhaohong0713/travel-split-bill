@@ -36,7 +36,11 @@ def create_upload(
         )
     image_id = str(uuid4())
     key = f"receipts/{user_id}/{request.trip_id}/{image_id}.jpg"
-    session.add(ReceiptImage(id=image_id, owner_id=user_id, trip_id=request.trip_id, object_key=key))
+    session.add(
+        ReceiptImage(
+            id=image_id, owner_id=user_id, trip_id=request.trip_id, object_key=key
+        )
+    )
     session.commit()
     return {
         "data": {
@@ -74,3 +78,24 @@ def create_receipt_job(
     session.add(job)
     session.commit()
     return {"data": {"id": job.id, "status": job.status}}
+
+
+@router.get("/receipt-jobs/{job_id}")
+def get_receipt_job(
+    job_id: str, session: DbSession, user_id: CurrentUser
+) -> dict[str, object]:
+    job = session.get(ReceiptJob, job_id)
+    if job is None:
+        raise _not_found()
+    image = session.get(ReceiptImage, job.image_id)
+    if image is None or image.owner_id != user_id:
+        raise _not_found()
+    return {
+        "data": {
+            "id": job.id,
+            "status": job.status,
+            "attempts": job.attempts,
+            "candidates": job.candidates_json or [],
+            "error_code": job.error_code,
+        }
+    }
