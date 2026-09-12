@@ -2,6 +2,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from app.db.models import Base
 from sqlalchemy import engine_from_config, pool
 
 config = context.config
@@ -13,8 +14,7 @@ database_url = os.getenv("DATABASE_URL")
 if database_url is not None:
     config.set_main_option("sqlalchemy.url", database_url)
 
-# Product metadata is introduced with the Task 3 schema migration.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
