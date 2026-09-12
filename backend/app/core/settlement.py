@@ -20,6 +20,7 @@ class LineItem:
     amount: Money
     allocation: Allocation
     tax_amount: Money | None = None
+    tax_included: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,8 @@ class Expense:
     actual_payment: Money | None = None
     reference_rate: str | None = None
     reference_rate_source: str | None = None
+    payment_to_settlement_rate: str | None = None
+    payment_to_settlement_rate_source: str | None = None
     rounding_owner_id: str | None = None
 
 
@@ -181,13 +184,14 @@ def _calculate_expense(
         )
         if item.tax_amount is not None:
             _require_currency(item.tax_amount, source_currency)
-            base_total += item.tax_amount.decimal
-            _append_allocated_component(
-                components,
-                item.tax_amount.decimal,
-                item.allocation,
-                f"item_tax:{item.item_id}",
-            )
+            if not item.tax_included:
+                base_total += item.tax_amount.decimal
+                _append_allocated_component(
+                    components,
+                    item.tax_amount.decimal,
+                    item.allocation,
+                    f"item_tax:{item.item_id}",
+                )
 
     for adjustment in sorted(
         expense.adjustments, key=lambda value: value.adjustment_id
@@ -292,14 +296,25 @@ def _resolve_rate(
     base_total: Decimal,
 ) -> tuple[Decimal, str, Decimal]:
     if expense.actual_payment is not None:
-        if expense.actual_payment.currency != settlement_currency:
-            raise ValueError("actual payment must use the settlement currency")
         if base_total == 0:
             raise ValueError("cannot map an actual payment from a zero source total")
+        payment_rate = Decimal(1)
+        payment_rate_source = "same-currency"
+        if expense.actual_payment.currency != settlement_currency:
+            if expense.payment_to_settlement_rate is None:
+                raise ValueError("actual payment needs a saved rate to use another settlement currency")
+            payment_rate = decimal_from_string(
+                expense.payment_to_settlement_rate, label="payment to settlement rate"
+            )
+            if payment_rate <= 0:
+                raise ValueError("payment to settlement rate must be positive")
+            payment_rate_source = (
+                expense.payment_to_settlement_rate_source or "payment-reference-rate"
+            )
         return (
-            expense.actual_payment.decimal / base_total,
-            "actual-payment",
-            expense.actual_payment.decimal,
+            (expense.actual_payment.decimal / base_total) * payment_rate,
+            "actual-payment" if payment_rate_source == "same-currency" else f"actual-payment+{payment_rate_source}",
+            expense.actual_payment.decimal * payment_rate,
         )
     if source_currency == settlement_currency:
         return Decimal(1), "same-currency", base_total

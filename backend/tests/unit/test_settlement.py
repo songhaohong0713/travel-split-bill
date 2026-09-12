@@ -91,6 +91,61 @@ def test_actual_cny_payment_overrides_reference_rate_with_discounts() -> None:
     assert any(line.reason == "shared_discount" for line in result.audit_lines)
 
 
+def test_actual_payment_can_be_converted_to_a_different_settlement_currency() -> None:
+    expense = Expense(
+        expense_id="seoul-purchase",
+        payer_id="owner",
+        items=(
+            LineItem(
+                item_id="friend-item",
+                amount=money("KRW", "10000"),
+                allocation=person_allocation("friend"),
+            ),
+        ),
+        actual_payment=money("CNY", "50"),
+        payment_to_settlement_rate="0.14",
+        payment_to_settlement_rate_source="manual-payment-rate",
+    )
+
+    result = calculate_settlement(
+        CalculateSettlementInput(
+            settlement_currency="USD",
+            participants=("owner", "friend"),
+            expenses=(expense,),
+        )
+    )
+
+    assert result.responsibility_by_participant["friend"] == money("USD", "7.00")
+    assert result.paid_by_participant["owner"] == money("USD", "7.00")
+    assert {line.rate_source for line in result.audit_lines} == {"actual-payment+manual-payment-rate"}
+
+
+def test_tax_included_in_item_price_is_not_charged_twice() -> None:
+    expense = Expense(
+        expense_id="tax-inclusive",
+        payer_id="owner",
+        items=(
+            LineItem(
+                item_id="friend-item",
+                amount=money("JPY", "1100"),
+                tax_amount=money("JPY", "100"),
+                tax_included=True,
+                allocation=person_allocation("friend"),
+            ),
+        ),
+        actual_payment=money("JPY", "1100"),
+    )
+
+    result = calculate_settlement(
+        CalculateSettlementInput(
+            settlement_currency="JPY",
+            participants=("owner", "friend"),
+            expenses=(expense,),
+        )
+    )
+
+    assert result.responsibility_by_participant["friend"] == money("JPY", "1100")
+
 def test_later_tax_refund_is_allocated_by_item_tax_not_total_price() -> None:
     items = (
         LineItem(
