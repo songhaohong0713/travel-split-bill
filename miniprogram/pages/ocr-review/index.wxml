@@ -1,0 +1,36 @@
+<view class="page">
+  <view class="masthead">
+    <text class="eyebrow">RECEIPT REVIEW</text>
+    <text class="title">核对识别结果</text>
+    <text class="subtitle">识别只提供候选。点选后请确认原文和金额，再带回手动录入。</text>
+  </view>
+
+  <view wx:if="{{status === 'failed'}}" class="failure-card">
+    <text class="card-title">这张小票没有识别成功</text>
+    <text class="failure-copy">{{errorCode ? '错误代码：' + errorCode + '。' : ''}}你可以返回后重新拍摄清晰、完整的小票；也可以直接手动填写商品与金额。</text>
+    <button class="secondary" bindtap="returnToManualEntry">返回手动录入</button>
+  </view>
+
+  <view wx:else>
+    <view wx:if="{{candidates.length}}" class="card">
+      <text class="label">原文候选（点选一条填入下方）</text>
+      <view wx:for="{{candidates}}" wx:key="id" class="candidate {{selectedId === item.id ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="chooseCandidate">
+        <text class="candidate-text">{{item.sourceText}}</text>
+        <text wx:if="{{item.amount}}" class="candidate-amount">{{item.amount}}</text>
+      </view>
+    </view>
+    <view wx:else class="empty-card">
+      <text class="card-title">没有可用候选</text>
+      <text class="hint">请直接手动填写，不会影响后续分账。</text>
+    </view>
+
+    <view class="card manual-card">
+      <text class="label">商品原文</text>
+      <input placeholder="例如：お茶 120" value="{{sourceText}}" bindinput="onSourceText" />
+      <text class="label">商品金额</text>
+      <input type="digit" placeholder="例如：120" value="{{amount}}" bindinput="onAmount" />
+      <text class="hint">请以小票为准。税额、归属和优惠仍在手动录入页设置。</text>
+    </view>
+    <button class="primary" bindtap="applyManualItem">确认并带回录入页</button>
+  </view>
+</view>
