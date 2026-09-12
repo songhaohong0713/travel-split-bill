@@ -1,0 +1,6 @@
+.page { padding: 64rpx 40rpx; }
+.masthead { margin-bottom: 88rpx; }
+.eyebrow { display: block; color: #C46642; font-size: 22rpx; letter-spacing: 3rpx; }
+.title { display: block; margin-top: 18rpx; font-size: 64rpx; font-weight: 700; }
+.subtitle { display: block; margin-top: 18rpx; color: #617176; font-size: 28rpx; }
+.primary { background: #173C48; color: #FFFDF6; border-radius: 16rpx; font-weight: 600; }
