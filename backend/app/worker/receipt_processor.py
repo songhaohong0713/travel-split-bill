@@ -1,8 +1,10 @@
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
-from app.db.models import ReceiptImage, ReceiptJob
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.db.models import ReceiptImage, ReceiptJob
 
 
 class OcrProvider(Protocol):
@@ -25,7 +27,7 @@ def process_next_job(
             raise RuntimeError("image missing")
         provider.recognize(load_image(image.object_key))
         job.status = "needs_review"
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         job.status = "failed"
     session.commit()
     return job

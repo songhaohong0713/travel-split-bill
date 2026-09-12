@@ -25,6 +25,7 @@ def test_worker_marks_successful_job_needs_review(session) -> None:
     session.add(ReceiptJob(id="job", image_id="image", status="queued"))
     session.commit()
     job = process_next_job(session, FakeOcr(), lambda _: b"image")
+    assert job is not None
     assert job.status == "needs_review"
 
 
@@ -41,4 +42,5 @@ def test_worker_marks_provider_failure_failed(session) -> None:
     session.add(ReceiptJob(id="job", image_id="image", status="queued"))
     session.commit()
     job = process_next_job(session, FailingOcr(), lambda _: b"image")
+    assert job is not None
     assert job.status == "failed"
