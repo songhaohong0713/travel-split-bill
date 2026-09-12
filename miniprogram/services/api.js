@@ -25,4 +25,13 @@ function login() {
 
 function createTrip(name, defaultCurrency) { return request("/v1/trips", { method: "POST", data: { name, default_currency: defaultCurrency } }) }
 function previewSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/preview`, { method: "POST", data }) }
-module.exports = { request, login, createTrip, previewSettlement }
+function uploadReceipt(tripId, filePath) {
+  return new Promise((resolve, reject) => wx.getFileInfo({ src: filePath, success: resolve, fail: reject }))
+    .then((info) => request("/v1/uploads", { method: "POST", data: { trip_id: tripId, mime_type: "image/jpeg", byte_size: info.size, sha256: "0".repeat(64) } }))
+    .then((upload) => new Promise((resolve, reject) => wx.uploadFile({ url: upload.upload_url.startsWith("/") ? `${app.globalData.apiBaseUrl}${upload.upload_url}` : upload.upload_url, filePath, name: "file", success: () => resolve(upload), fail: reject })))
+    .then((upload) => request(`/v1/uploads/${upload.image_id}/complete`, { method: "POST" }))
+    .then((image) => request("/v1/receipt-jobs", { method: "POST", data: { image_id: image.image_id } }))
+}
+
+function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
+module.exports = { request, login, createTrip, previewSettlement, uploadReceipt, getReceiptJob }

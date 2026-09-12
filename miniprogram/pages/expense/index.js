@@ -1,8 +1,9 @@
-const { previewSettlement } = require("../../services/api")
+const { previewSettlement, uploadReceipt, getReceiptJob } = require("../../services/api")
 Page({
   data: { tripId: "", currency: "CNY", amount: "", payer: "我", friend: "", allocationIndex: 0, allocationLabels: ["付款人自己买", "同行人自己买", "两人均分"], receiptPath: "", ocrStatus: "未上传" },
   onLoad(q) { this.setData({ tripId: q.tripId, currency: q.currency }) },
-  chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); wx.showToast({ title: "已选择，等待上传识别", icon: "none" }) } }) }) },
+  chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); this.startOcr(tempFilePath) } }) }) },
+  startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) }, pollOcr(jobId) { getReceiptJob(jobId).then((job) => { const labels = { queued: "排队识别中", processing: "正在识别", needs_review: "待核对", failed: "识别失败，可手动录入" }; this.setData({ ocrStatus: labels[job.status] || job.status }); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }) },
   onAmount(e) { this.setData({ amount: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onAllocation(e) { this.setData({ allocationIndex: Number(e.detail.value) }) },
   preview() {
     const { tripId, currency, amount, payer, friend, allocationIndex } = this.data
