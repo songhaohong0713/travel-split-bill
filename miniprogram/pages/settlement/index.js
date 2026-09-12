@@ -1,0 +1,1 @@
+Page({ data: { transfers: [] }, onLoad(query) { if (query.result) this.setData({ transfers: JSON.parse(decodeURIComponent(query.result)).transfers || [] }) }, publish() { wx.showToast({ title: "发布接口待接入", icon: "none" }) }, share() { wx.showToast({ title: "请先发布结算版本", icon: "none" }) } })
