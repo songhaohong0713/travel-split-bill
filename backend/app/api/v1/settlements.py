@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -13,7 +13,7 @@ from app.core.settlement import (
     LineItem,
     calculate_settlement,
 )
-from app.db.models import Trip
+from app.db.models import SettlementVersion, Trip
 
 router = APIRouter(prefix="/v1", tags=["settlements"])
 
@@ -149,3 +149,41 @@ def preview_settlement(
             ],
         }
     }
+
+
+@router.post(
+    "/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED
+)
+def publish_settlement(
+    trip_id: str, request: PreviewRequest, session: DbSession, user_id: CurrentUser
+) -> dict[str, object]:
+    trip = session.scalar(
+        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
+    )
+    if trip is None:
+        raise _not_found()
+    result = calculate_settlement(
+        CalculateSettlementInput(
+            settlement_currency=request.settlement_currency,
+            participants=tuple(request.participants),
+            expenses=tuple(expense.to_expense() for expense in request.expenses),
+        )
+    )
+    projection = {
+        "transfers": [
+            {
+                "from_participant_id": transfer.from_participant_id,
+                "to_participant_id": transfer.to_participant_id,
+                "amount": _money(transfer.amount),
+            }
+            for transfer in result.transfers
+        ]
+    }
+    version = SettlementVersion(
+        trip_id=trip_id, result_json=projection, public_json=projection
+    )
+    session.add(version)
+    session.flush()
+    trip.latest_version_id = version.id
+    session.commit()
+    return {"data": {"id": version.id, "trip_id": trip_id, "result": projection}}

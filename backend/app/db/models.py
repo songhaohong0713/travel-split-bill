@@ -50,6 +50,21 @@ class Trip(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
     default_currency: Mapped[str] = mapped_column(String(3))
+    latest_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SettlementVersion(Base):
+    __tablename__ = "settlement_versions"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
+    result_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    public_json: Mapped[dict[str, object]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
