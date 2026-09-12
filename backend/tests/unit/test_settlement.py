@@ -63,9 +63,7 @@ def test_actual_cny_payment_overrides_reference_rate_with_discounts() -> None:
             Adjustment(
                 adjustment_id="store-discount",
                 amount=money("JPY", "-500"),
-                allocation=Allocation.from_shares(
-                    {"owner": "0.6", "friend": "0.4"}
-                ),
+                allocation=Allocation.from_shares({"owner": "0.6", "friend": "0.4"}),
                 reason="shared_discount",
             ),
         ),
@@ -83,9 +81,7 @@ def test_actual_cny_payment_overrides_reference_rate_with_discounts() -> None:
     )
 
     assert result.responsibility_by_participant["friend"].amount == "168.42"
-    assert result.transfers == (
-        Transfer("friend", "owner", money("CNY", "168.42")),
-    )
+    assert result.transfers == (Transfer("friend", "owner", money("CNY", "168.42")),)
     assert {line.rate_source for line in result.audit_lines} == {"actual-payment"}
     assert any(line.reason == "personal_coupon" for line in result.audit_lines)
     assert any(line.reason == "shared_discount" for line in result.audit_lines)
@@ -117,7 +113,9 @@ def test_actual_payment_can_be_converted_to_a_different_settlement_currency() ->
 
     assert result.responsibility_by_participant["friend"] == money("USD", "7.00")
     assert result.paid_by_participant["owner"] == money("USD", "7.00")
-    assert {line.rate_source for line in result.audit_lines} == {"actual-payment+manual-payment-rate"}
+    assert {line.rate_source for line in result.audit_lines} == {
+        "actual-payment+manual-payment-rate"
+    }
 
 
 def test_tax_included_in_item_price_is_not_charged_twice() -> None:
@@ -145,6 +143,7 @@ def test_tax_included_in_item_price_is_not_charged_twice() -> None:
     )
 
     assert result.responsibility_by_participant["friend"] == money("JPY", "1100")
+
 
 def test_later_tax_refund_is_allocated_by_item_tax_not_total_price() -> None:
     items = (
@@ -302,7 +301,9 @@ def test_generated_quantized_net_sums_to_zero(amount: int, weights: list[int]) -
                 allocation=Allocation.from_weights(
                     {
                         participant: str(weight)
-                        for participant, weight in zip(participants, weights, strict=True)
+                        for participant, weight in zip(
+                            participants, weights, strict=True
+                        )
                     }
                 ),
             ),
@@ -318,10 +319,7 @@ def test_generated_quantized_net_sums_to_zero(amount: int, weights: list[int]) -
         )
     )
 
-    assert (
-        sum(
-            (balance.decimal for balance in result.net_by_participant.values()),
-            start=Decimal(0),
-        )
-        == Decimal(0)
-    )
+    assert sum(
+        (balance.decimal for balance in result.net_by_participant.values()),
+        start=Decimal(0),
+    ) == Decimal(0)

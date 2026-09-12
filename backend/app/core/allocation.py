@@ -67,7 +67,9 @@ def person_allocation(participant_id: str) -> Allocation:
 def equal_allocation(participant_ids: Sequence[str]) -> Allocation:
     if len(set(participant_ids)) != len(participant_ids):
         raise ValueError("participant ids must be unique")
-    return Allocation.from_weights({participant_id: "1" for participant_id in participant_ids})
+    return Allocation.from_weights(
+        {participant_id: "1" for participant_id in participant_ids}
+    )
 
 
 def allocate_decimal(amount: Decimal, allocation: Allocation) -> dict[str, Decimal]:

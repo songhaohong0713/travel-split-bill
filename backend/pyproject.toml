@@ -10,6 +10,7 @@ dependencies = [
     "hypothesis",
     "mypy",
     "pydantic",
+    "pyjwt>=2.14.0",
     "pymysql",
     "pytest",
     "ruff",

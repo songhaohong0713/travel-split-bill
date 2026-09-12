@@ -149,9 +149,7 @@ def calculate_settlement(data: CalculateSettlementInput) -> SettlementResult:
         raise AssertionError("quantized net balances must sum to zero")
 
     return SettlementResult(
-        responsibility_by_participant=_money_map(
-            responsibility, settlement_currency
-        ),
+        responsibility_by_participant=_money_map(responsibility, settlement_currency),
         paid_by_participant=_money_map(paid, settlement_currency),
         net_by_participant=_money_map(net, settlement_currency),
         transfers=_minimum_transfers(net, settlement_currency),
@@ -208,7 +206,9 @@ def _calculate_expense(
             base_total += adjustment.amount.decimal
         else:
             if adjustment.received_by not in participants:
-                raise ValueError(f"unknown adjustment recipient: {adjustment.received_by}")
+                raise ValueError(
+                    f"unknown adjustment recipient: {adjustment.received_by}"
+                )
             if adjustment.amount.decimal >= 0:
                 raise ValueError("received adjustments must be negative refunds")
             cash_adjustments.append(adjustment)
@@ -220,9 +220,7 @@ def _calculate_expense(
         base_total=base_total,
     )
 
-    raw_responsibility = {
-        participant_id: Decimal(0) for participant_id in participants
-    }
+    raw_responsibility = {participant_id: Decimal(0) for participant_id in participants}
     audit_lines: list[AuditLine] = []
     for participant_id, source_amount, reason in components:
         converted = source_amount * rate
@@ -243,8 +241,7 @@ def _calculate_expense(
     }
     for participant_id in participants:
         quantization_difference = (
-            expense_responsibility[participant_id]
-            - raw_responsibility[participant_id]
+            expense_responsibility[participant_id] - raw_responsibility[participant_id]
         )
         if quantization_difference != 0:
             audit_lines.append(
@@ -272,9 +269,9 @@ def _calculate_expense(
     rounding_owner = expense.rounding_owner_id or expense.payer_id
     if rounding_owner not in participants:
         raise ValueError(f"unknown rounding owner: {rounding_owner}")
-    rounding_difference = sum(
-        expense_paid.values(), start=Decimal(0)
-    ) - sum(expense_responsibility.values(), start=Decimal(0))
+    rounding_difference = sum(expense_paid.values(), start=Decimal(0)) - sum(
+        expense_responsibility.values(), start=Decimal(0)
+    )
     expense_responsibility[rounding_owner] += rounding_difference
     audit_lines.append(
         AuditLine(
@@ -302,7 +299,9 @@ def _resolve_rate(
         payment_rate_source = "same-currency"
         if expense.actual_payment.currency != settlement_currency:
             if expense.payment_to_settlement_rate is None:
-                raise ValueError("actual payment needs a saved rate to use another settlement currency")
+                raise ValueError(
+                    "actual payment needs a saved rate to use another settlement currency"
+                )
             payment_rate = decimal_from_string(
                 expense.payment_to_settlement_rate, label="payment to settlement rate"
             )
@@ -313,13 +312,17 @@ def _resolve_rate(
             )
         return (
             (expense.actual_payment.decimal / base_total) * payment_rate,
-            "actual-payment" if payment_rate_source == "same-currency" else f"actual-payment+{payment_rate_source}",
+            "actual-payment"
+            if payment_rate_source == "same-currency"
+            else f"actual-payment+{payment_rate_source}",
             expense.actual_payment.decimal * payment_rate,
         )
     if source_currency == settlement_currency:
         return Decimal(1), "same-currency", base_total
     if expense.reference_rate is None:
-        raise ValueError("cross-currency expense requires actual payment or a saved rate")
+        raise ValueError(
+            "cross-currency expense requires actual payment or a saved rate"
+        )
     rate = decimal_from_string(expense.reference_rate, label="reference rate")
     if rate <= 0:
         raise ValueError("reference rate must be positive")
@@ -341,9 +344,7 @@ def _append_allocated_component(
         components.append((participant_id, participant_amount, reason))
 
 
-def _validate_allocation(
-    allocation: Allocation, participants: tuple[str, ...]
-) -> None:
+def _validate_allocation(allocation: Allocation, participants: tuple[str, ...]) -> None:
     unknown = set(allocation.participant_ids) - set(participants)
     if unknown:
         raise ValueError(f"allocation includes unknown participants: {sorted(unknown)}")
@@ -371,11 +372,13 @@ def _money_map(values: dict[str, Decimal], currency: str) -> dict[str, Money]:
     }
 
 
-def _minimum_transfers(
-    net: dict[str, Decimal], currency: str
-) -> tuple[Transfer, ...]:
+def _minimum_transfers(net: dict[str, Decimal], currency: str) -> tuple[Transfer, ...]:
     creditors = sorted(
-        ((participant_id, amount) for participant_id, amount in net.items() if amount > 0),
+        (
+            (participant_id, amount)
+            for participant_id, amount in net.items()
+            if amount > 0
+        ),
         key=lambda value: (-value[1], value[0]),
     )
     debtors = sorted(
