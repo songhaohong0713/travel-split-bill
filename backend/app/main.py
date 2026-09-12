@@ -5,12 +5,14 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.trips import router as trips_router
+from app.api.v1.uploads import router as uploads_router
 
 app = FastAPI()
 app.include_router(auth_router)
 app.include_router(trips_router)
 app.include_router(settlements_router)
 app.include_router(shares_router)
+app.include_router(uploads_router)
 
 
 @app.exception_handler(HTTPException)
