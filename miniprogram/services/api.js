@@ -25,6 +25,8 @@ function login() {
 
 function createTrip(name, defaultCurrency) { return request("/v1/trips", { method: "POST", data: { name, default_currency: defaultCurrency } }) }
 function previewSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/preview`, { method: "POST", data }) }
+function publishSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/publish`, { method: "POST", data }) }
+function createShareLink(tripId, expiresInDays) { return request(`/v1/trips/${tripId}/share-links`, { method: "POST", data: { expires_in_days: expiresInDays } }) }
 function uploadReceipt(tripId, filePath) {
   return new Promise((resolve, reject) => wx.getFileInfo({ src: filePath, success: resolve, fail: reject }))
     .then((info) => request("/v1/uploads", { method: "POST", data: { trip_id: tripId, mime_type: "image/jpeg", byte_size: info.size, sha256: "0".repeat(64) } }))
@@ -34,4 +36,4 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, createTrip, previewSettlement, uploadReceipt, getReceiptJob }
+module.exports = { request, login, createTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
