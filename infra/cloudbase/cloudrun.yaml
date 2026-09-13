@@ -1,29 +1,28 @@
-# CloudBase Run deployment blueprint.
-# Replace image/project values during deployment. Secret values must be created
-# in CloudBase Secret Manager; do not put credentials in this file.
+# CloudBase Run API deployment blueprint.
+# This records the values to enter in the CloudBase Git deployment console;
+# secrets are created in CloudBase and must never be committed here.
 version: "1.0"
-project: travel-split
+project: travel-split-bill
 services:
-  - name: split-api
-    image: registry.example.com/travel-split:${IMAGE_TAG}
-    port: 8000
+  - name: travel-split-api
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    port: 8080
     command:
-      - uvicorn
-      - app.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
+      - sh
+      - -c
+      - exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
     healthCheck:
       path: /healthz
-      port: 8000
+      port: 8080
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 3
       failureThreshold: 3
     envFrom:
       secretRef:
-        name: travel-split-secrets
+        name: travel-split-bill-secrets
         keys:
           - DATABASE_URL
           - JWT_SECRET
@@ -39,22 +38,6 @@ services:
           - OCR_MAX_ATTEMPTS
           - CORS_ORIGINS
 
-  - name: split-ocr-worker
-    image: registry.example.com/travel-split:${IMAGE_TAG}
-    command:
-      - python
-      - -m
-      - app.worker.run
-    envFrom:
-      secretRef:
-        name: travel-split-secrets
-        keys:
-          - DATABASE_URL
-          - COS_SECRET_ID
-          - COS_SECRET_KEY
-          - COS_BUCKET
-          - COS_REGION
-          - TENCENTCLOUD_SECRET_ID
-          - TENCENTCLOUD_SECRET_KEY
-          - TENCENTCLOUD_REGION
-          - OCR_MAX_ATTEMPTS
+# Deferred: do not create an OCR worker service yet. The repository has no
+# app.worker.run entrypoint and no production COS image loader, so deploying
+# one would repeatedly fail instead of processing receipt jobs.

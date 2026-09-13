@@ -1,0 +1,27 @@
+# Version control and local worktrees
+.git
+.worktrees
+
+# Local environments, credentials, and tool caches
+.env
+.env.*
+backend/.env
+.venv
+backend/.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+**/__pycache__
+**/*.py[cod]
+
+# Development-only inputs
+backend/tests
+miniprogram
+docs
+scripts
+.superpowers
+node_modules
+dist
+coverage.xml
+htmlcov

@@ -1,95 +1,101 @@
 # Python 服务部署与运维
 
-本文说明自动分账 MVP 的生产运行方式。API 与 OCR worker 使用同一 Python 3.12 镜像，但在 CloudBase Run 中作为两个独立服务运行：API 负责 HTTPS 请求，worker 负责从 MySQL job 表领取并处理小票 OCR 任务。
+本文说明自动分账 MVP 的首个线上服务：CloudBase 云托管中的 FastAPI API。当前 CloudBase 环境使用 **PostgreSQL 17.11**；本文不再使用 MySQL 连接串或 MySQL 相关配置。
 
-## 组件
+## 当前可部署范围
 
-| 组件 | 运行方式 | 责任 |
+| 组件 | 当前状态 | 责任 |
 | --- | --- | --- |
-| `split-api` | CloudBase Run，`uvicorn app.main:app` | 微信登录、旅行/消费、结算、发布和分享 API |
-| `split-ocr-worker` | CloudBase Run，`python -m app.worker.run` | 领取 `receipt_jobs`、读取私有 COS、调用腾讯 OCR、写回候选和状态 |
-| CloudBase MySQL | 私有网络优先 | 业务数据、结算快照、上传记录和 OCR job 状态 |
-| 私有 COS | 禁止公共读 | 小票原图；API 只签发短期上传 URL，分享接口不返回原图 URL |
-| 腾讯云 OCR | 服务端 SDK | 日语、英语、韩语优先的票据文字识别；结果必须人工核对 |
+| `travel-split-api` | 可作为首个云托管服务部署 | 微信登录、旅行/消费、结算、发布、分享、上传/OCR job API |
+| CloudBase PostgreSQL | 由 CloudBase 环境提供 | 业务数据、结算快照、上传记录、OCR job 状态 |
+| 私有 COS | 已单独创建 | 小票原图；服务端负责受限上传 URL 和后续读取 |
+| 腾讯云 OCR | 需后续配置密钥 | 日语、英语、韩语优先的票据文字识别；结果必须人工核对 |
+| OCR worker | **暂不部署** | 仓库尚没有 `app.worker.run` 入口，也没有生产 COS 图片加载器；不能先创建一个会持续失败的 worker 服务 |
 
-API 与 worker 必须使用同一镜像版本和同一个数据库。worker 可以水平扩容；job 领取必须依赖数据库行锁/状态条件，避免同一 job 被重复处理。
+API 与未来 OCR worker 最终会共享 PostgreSQL 和 COS，但当前仅部署 API。OCR job 的领取、真实 COS 读取和 worker 入口实现完成并验收后，才新增第二个服务。
 
-## 镜像与启动命令
+## Docker 镜像与端口
 
-在仓库根目录构建镜像（示例）：
-
-```sh
-docker build -f backend/Dockerfile -t <registry>/travel-split:<git-sha> .
-docker push <registry>/travel-split:<git-sha>
-```
-
-API 服务命令：
+镜像定义在仓库的 [`backend/Dockerfile`](../../backend/Dockerfile)。它运行：
 
 ```sh
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
-worker 服务命令：
+容器服务端口为 **8080**，CloudBase 页面中的访问端口可映射为 **80**。健康检查使用 `GET /healthz`，预期 HTTP 200：
+
+```json
+{"status":"ok"}
+```
+
+本地有 Docker 时可构建并检查：
 
 ```sh
-python -m app.worker.run
+docker build -f backend/Dockerfile -t travel-split-api:local .
+docker run --rm -e PORT=8080 -p 8080:8080 travel-split-api:local
+# 新终端：curl http://localhost:8080/healthz
 ```
 
-worker 需实现优雅退出；收到 SIGTERM 后停止领取新任务，并等待当前 OCR 调用在超时内结束。生产环境不可使用内存队列替代 `receipt_jobs`。
+## CloudBase Git 平台部署
 
-## 必需 Secret 与环境变量
+在“云函数 / 托管 → 服务管理 → 新建 Git 平台部署”中填入：
 
-所有密钥放 CloudBase Secret，不写入镜像、Git、日志或小程序包。`infra/cloudbase/cloudrun.yaml` 只列出 Secret 名称和键名。
+| 控制台字段 | 值 |
+| --- | --- |
+| Git 仓库 | `songhaohong0713/travel-split-bill` |
+| 部署分支 | 首次选择包含本配置的分支；验收后生产使用受保护的 `main` |
+| 服务名称 | `travel-split-api` |
+| 服务端口 | `8080` |
+| 访问端口 | `80` |
+| Dockerfile 路径 | `backend/Dockerfile` |
+| 构建上下文 / 根目录 | 仓库根目录 `.` |
+| 健康检查 | 路径 `/healthz`，端口 `8080` |
+
+首次部署先关闭“自动部署”。确认镜像构建、迁移和 `/healthz` 都成功后，再按需要开启指定分支推送后的自动部署。
+
+## Secret 与 PostgreSQL
+
+所有密钥放在 CloudBase Secret，不能写入 Git、Docker 镜像层、日志或小程序包。`infra/cloudbase/cloudrun.yaml` 仅保存变量名称。
 
 | 环境变量 | 用途 |
 | --- | --- |
-| `DATABASE_URL` | MySQL SQLAlchemy 连接串（含 TLS/连接池参数） |
-| `JWT_SECRET` | access token 签名密钥 |
-| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信 `code2session` |
-| `COS_SECRET_ID` / `COS_SECRET_KEY` | 服务端签发 COS URL；建议改为 CAM 临时凭证 |
-| `COS_BUCKET` / `COS_REGION` | 私有小票桶 |
-| `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY` | 腾讯 OCR SDK |
+| `DATABASE_URL` | PostgreSQL SQLAlchemy 连接串，例如 `postgresql+psycopg://<user>:<password>@<host>:5432/<database>?sslmode=require` |
+| `JWT_SECRET` | access token 签名密钥，使用随机高强度值 |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信 `code2session` 配置 |
+| `COS_SECRET_ID` / `COS_SECRET_KEY` | 服务端访问私有 COS；后续应迁移为 CAM 临时凭证/最小权限角色 |
+| `COS_BUCKET` / `COS_REGION` | `travel-split-bill-1486947970` 与 `ap-guangzhou` |
+| `TENCENTCLOUD_SECRET_ID` / `TENCENTCLOUD_SECRET_KEY` | 腾讯 OCR SDK 配置 |
 | `TENCENTCLOUD_REGION` | OCR 服务地域 |
 | `OCR_MAX_ATTEMPTS` | OCR 最大尝试次数，默认 3 |
-| `CORS_ORIGINS` | 分享 H5 或受信任前端来源，生产禁止 `*` |
+| `CORS_ORIGINS` | 分享 H5 或受信任前端来源；生产不可设为 `*` |
 
-参考汇率服务（如启用）应通过 `RATES_BASE_URL` 配置；外部服务超时和失败必须回退为人工录入/手动汇率。
+当前 CloudBase PostgreSQL 共享实例页面若还未提供可供云托管使用的主机、数据库名、账号和密码，就**不要猜测或伪造** `DATABASE_URL`，也不要发布 API。先在 CloudBase 文档/控制台确认该实例的云托管连接方式，或创建一个可提供连接凭据的 PostgreSQL 实例；拿到凭据后才创建 `DATABASE_URL` Secret。
 
-## 首次部署与迁移
+`backend/Dockerfile` 在运行镜像中安装 `psycopg`，因此 DSN 必须使用 `postgresql+psycopg://`，不能使用 `mysql+pymysql://`。
 
-1. 创建 CloudBase MySQL、私有 COS 桶和 CloudBase Run 环境。
-2. 创建 Secret，并按上表注入 API 与 worker。生产 Secret 不要复制到本地文件。
-3. 先执行一次数据库迁移，再扩容 API/worker：
+## 首次迁移与发布顺序
+
+1. 确认 PostgreSQL 连接凭据，并在 CloudBase Secret 创建 `DATABASE_URL` 和其余必需变量。
+2. 用与 API 相同的 `DATABASE_URL` 一次性运行迁移：
 
    ```sh
    cd backend
    alembic upgrade head
    ```
 
-   迁移应使用与 API 相同的 `DATABASE_URL`。迁移命令是一次性运维 job，不应随每个 API 容器启动重复执行。
-4. 部署 API，确认 `/healthz` 返回 `{"status":"ok"}`，再部署 worker。
-5. 将小程序合法 request/upload 域名指向 API 与 COS 的 HTTPS 域名；COS 桶保持私有。
+   迁移不能作为每次 API 容器启动动作。若 CloudBase 尚无受控的一次性任务方式，应在受控网络环境执行，而不是在应用启动时自动建表。
+3. 使用上表部署 `travel-split-api`，确认 CloudBase 日志无数据库/环境变量异常。
+4. 请求服务公开 HTTPS 地址的 `/healthz`，确认 HTTP 200 和 `{"status":"ok"}`。
+5. 再配置小程序合法 request 域名；COS 桶维持私有，不需配置 CDN 或公开读。
 
-## 健康检查与观测
+## 观测、安全与故障处理
 
-API liveness/readiness 使用 `GET /healthz`，HTTP 200 且 JSON `status=ok` 才算健康。CloudBase Run 探针建议初始延迟 5 秒、周期 10 秒、超时 3 秒、失败阈值 3 次。
-
-worker 没有对外业务接口，至少输出结构化日志：`job_id`、`attempts`、`status`、`provider`、耗时和错误码；不得输出图片内容、OCR 完整原文、微信 openid 或任何 Secret。应监控：
-
-- API 5xx、P95 延迟、数据库连接池耗尽；
-- `queued` job 年龄、OCR 成功/失败/重试比例；
-- COS 上传确认失败、OCR provider 超时/限流；
-- 分享链接过期/撤销后的访问拒绝率。
-
-告警阈值沿用产品方案：OCR/翻译 15 分钟失败率超过 10%、汇率失败率超过 5%、API P95 超过 8 秒或分享 API 5xx 超过 1%。
-
-## 安全与故障处理
-
-- MySQL、COS 和 OCR 只由服务端访问；小程序永远不接触数据库或腾讯密钥。
-- COS 只接受短期、单对象、限定 Content-Type 的 PUT URL；公开分享默认不附带小票原图。
-- OCR 结果状态为 `needs_review` 时才允许进入人工核对；OCR 失败保留图片和错误码，允许重新提交或手动录入。
+- PostgreSQL、COS、OCR 仅由服务端访问；小程序永远不接触数据库或腾讯密钥。
+- COS 上传 URL 应限定单对象、短期和 Content-Type；公开分享默认不附带小票原图。
+- OCR `needs_review` 才进入人工核对；失败保留错误码并允许重新提交或手动录入。
 - 发布结算使用不可变版本；分享链接只展示最新已发布版本，不展示草稿。
-- 发生数据库故障时暂停 worker 领取任务；恢复后由 `queued`/可重试 job 继续处理。不要手工删除 job 记录来“清空队列”。
+- API 监控 API 5xx、P95 延迟、数据库连接池耗尽、COS 上传确认失败和 OCR provider 超时/限流。
+- 未来 worker 监控 `queued` job 年龄及 OCR 成功/失败/重试比例；在其入口和 COS 读取实现前，此项不适用。
 
 ## 本地验收
 
@@ -97,7 +103,6 @@ worker 没有对外业务接口，至少输出结构化日志：`job_id`、`atte
 uv run pytest backend/tests -q
 uv run ruff check backend
 uv run mypy backend
-uv run alembic -c backend/alembic.ini upgrade head
 ```
 
-真实云服务验收必须另行使用脱敏小票，覆盖上传确认、OCR 成功/失败重试、人工核对、结算发布、链接过期和越权访问。
+真实云服务验收须使用脱敏小票，覆盖上传确认、OCR 成功/失败重试、人工核对、结算发布、链接过期和越权访问。
