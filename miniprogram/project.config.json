@@ -1,0 +1,7 @@
+{
+  "appid": "wxe212faa84231f5d0",
+  "compileType": "miniprogram",
+  "projectname": "travel-split-bill",
+  "miniprogramRoot": "./",
+  "setting": { "es6": true, "postcss": true, "minified": true }
+}
