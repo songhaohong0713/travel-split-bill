@@ -63,3 +63,89 @@ def test_same_idempotency_key_creates_one_expense(client: TestClient) -> None:
     assert first.status_code == second.status_code == 201
     assert first.json() == second.json()
     assert len(listed.json()["data"]) == 1
+
+
+def test_trip_list_only_returns_current_owners_trips(client: TestClient) -> None:
+    first_trip_id = create_trip(client, "owner-a")
+    create_trip(client, "owner-b")
+
+    response = client.get("/v1/trips", headers=auth("owner-a"))
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [
+        {
+            "id": first_trip_id,
+            "name": "东京",
+            "default_currency": "CNY",
+        }
+    ]
+
+
+def test_owner_can_update_expense_with_current_revision(client: TestClient) -> None:
+    trip_id = create_trip(client, "owner-a")
+    created = client.post(
+        f"/v1/trips/{trip_id}/expenses",
+        headers={
+            **auth("owner-a"),
+            "Idempotency-Key": "a9d5c121-faa7-4104-a455-ae9e1ca81c62",
+        },
+        json={"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}},
+    )
+    expense_id = created.json()["data"]["id"]
+
+    response = client.patch(
+        f"/v1/trips/{trip_id}/expenses/{expense_id}",
+        headers=auth("owner-a"),
+        json={
+            "revision": 1,
+            "occurred_at": "2026-08-16",
+            "payload": {"note": "抹茶拿铁"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "id": expense_id,
+        "revision": 2,
+        "occurred_at": "2026-08-16",
+        "payload": {"note": "抹茶拿铁"},
+    }
+
+
+def test_expense_update_rejects_stale_revision_and_other_owner(
+    client: TestClient,
+) -> None:
+    trip_id = create_trip(client, "owner-a")
+    created = client.post(
+        f"/v1/trips/{trip_id}/expenses",
+        headers={
+            **auth("owner-a"),
+            "Idempotency-Key": "bf2379ae-55a2-45a0-8147-34ccf27972c8",
+        },
+        json={"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}},
+    )
+    expense_id = created.json()["data"]["id"]
+
+    stale = client.patch(
+        f"/v1/trips/{trip_id}/expenses/{expense_id}",
+        headers=auth("owner-a"),
+        json={
+            "revision": 99,
+            "occurred_at": "2026-08-15",
+            "payload": {"note": "抹茶"},
+        },
+    )
+    forbidden = client.patch(
+        f"/v1/trips/{trip_id}/expenses/{expense_id}",
+        headers=auth("owner-b"),
+        json={
+            "revision": 1,
+            "occurred_at": "2026-08-15",
+            "payload": {"note": "抹茶"},
+        },
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
+    assert forbidden.status_code == 404
+    assert forbidden.json()["error"]["code"] == "NOT_FOUND"

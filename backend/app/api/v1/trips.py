@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, User
@@ -19,6 +19,12 @@ class CreateTripRequest(BaseModel):
 
 
 class CreateExpenseRequest(BaseModel):
+    occurred_at: date
+    payload: dict[str, object]
+
+
+class UpdateExpenseRequest(BaseModel):
+    revision: int = Field(ge=1)
     occurred_at: date
     payload: dict[str, object]
 
@@ -52,6 +58,25 @@ def create_trip(
             "name": trip.name,
             "default_currency": trip.default_currency,
         }
+    }
+
+
+@router.get("/trips")
+def list_trips(
+    session: DbSession, user_id: CurrentUser
+) -> dict[str, list[dict[str, str]]]:
+    trips = session.scalars(
+        select(Trip).where(Trip.owner_id == user_id).order_by(Trip.created_at, Trip.id)
+    ).all()
+    return {
+        "data": [
+            {
+                "id": trip.id,
+                "name": trip.name,
+                "default_currency": trip.default_currency,
+            }
+            for trip in trips
+        ]
     }
 
 
@@ -143,3 +168,65 @@ def create_expense(
     )
     session.commit()
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=response)
+
+
+@router.patch("/trips/{trip_id}/expenses/{expense_id}")
+def update_expense(
+    trip_id: str,
+    expense_id: str,
+    request: UpdateExpenseRequest,
+    session: DbSession,
+    user_id: CurrentUser,
+) -> dict[str, dict[str, object]]:
+    trip = session.scalar(
+        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
+    )
+    if trip is None:
+        raise _not_found()
+    expense = session.scalar(
+        select(ExpenseRecord).where(
+            ExpenseRecord.id == expense_id,
+            ExpenseRecord.trip_id == trip_id,
+            ExpenseRecord.owner_id == user_id,
+        )
+    )
+    if expense is None:
+        raise _not_found()
+    result = session.execute(
+        update(ExpenseRecord)
+        .where(
+            ExpenseRecord.id == expense_id,
+            ExpenseRecord.owner_id == user_id,
+            ExpenseRecord.trip_id == trip_id,
+            ExpenseRecord.revision == request.revision,
+        )
+        .values(
+            occurred_at=request.occurred_at,
+            payload_json=request.payload,
+            revision=request.revision + 1,
+        )
+    )
+    if getattr(result, "rowcount", 0) != 1:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "REVISION_CONFLICT", "message": "消费记录已被更新"},
+        )
+    session.commit()
+    updated = session.scalar(
+        select(ExpenseRecord).where(
+            ExpenseRecord.id == expense_id,
+            ExpenseRecord.trip_id == trip_id,
+            ExpenseRecord.owner_id == user_id,
+        )
+    )
+    if updated is None:  # pragma: no cover
+        raise _not_found()
+    return {
+        "data": {
+            "id": updated.id,
+            "revision": updated.revision,
+            "occurred_at": updated.occurred_at.isoformat(),
+            "payload": updated.payload_json,
+        }
+    }
