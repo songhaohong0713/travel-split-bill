@@ -1,11 +1,32 @@
 import os
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
+from urllib.parse import quote
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 DEFAULT_DATABASE_URL = "sqlite+pysqlite:///:memory:"
-DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+
+
+def resolve_database_url(environment: Mapping[str, str] | None = None) -> str:
+    values = os.environ if environment is None else environment
+    explicit_url = values.get("DATABASE_URL")
+    if explicit_url:
+        return explicit_url
+
+    required_names = ("PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD")
+    if not all(values.get(name) for name in required_names):
+        return DEFAULT_DATABASE_URL
+
+    host = values["PGHOST"]
+    port = values.get("PGPORT", "5432")
+    database = quote(values["PGDATABASE"], safe="")
+    user = quote(values["PGUSER"], safe="")
+    password = quote(values["PGPASSWORD"], safe="")
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}?sslmode=require"
+
+
+DATABASE_URL = resolve_database_url()
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(
