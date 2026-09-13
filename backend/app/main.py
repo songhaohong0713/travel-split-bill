@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.trips import router as trips_router
 from app.api.v1.uploads import router as uploads_router
+from app.db import session as database
 
 app = FastAPI()
 app.include_router(auth_router)
@@ -27,3 +30,16 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> dict[str, str]:
+    try:
+        with database.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DATABASE_UNAVAILABLE", "message": "Database is unavailable"},
+        ) from exc
+    return {"status": "ready"}
