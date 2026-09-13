@@ -6,8 +6,8 @@ project: travel-split-bill
 services:
   - name: travel-split-api
     build:
-      context: .
-      dockerfile: backend/Dockerfile
+      context: backend
+      dockerfile: Dockerfile
     port: 8080
     command:
       - sh

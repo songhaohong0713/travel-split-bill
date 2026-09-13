@@ -10,10 +10,10 @@ WORKDIR /app
 # Keep the runtime image to the API and migration assets. PostgreSQL support
 # is installed here because the current CloudBase environment provides
 # PostgreSQL rather than MySQL.
-COPY backend/pyproject.toml ./pyproject.toml
-COPY backend/app ./app
-COPY backend/alembic ./alembic
-COPY backend/alembic.ini ./alembic.ini
+COPY pyproject.toml ./pyproject.toml
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 RUN pip install --upgrade pip \
     && pip install "." "psycopg[binary]>=3.2,<4"
 
