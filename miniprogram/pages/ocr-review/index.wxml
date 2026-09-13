@@ -27,6 +27,8 @@
     <view class="card manual-card">
       <text class="label">商品原文</text>
       <input placeholder="例如：お茶 120" value="{{sourceText}}" bindinput="onSourceText" />
+      <text class="label">中文翻译（可编辑）</text>
+      <input placeholder="例如：茶" value="{{translatedText}}" bindinput="onTranslatedText" />
       <text class="label">商品金额</text>
       <input type="digit" placeholder="例如：120" value="{{amount}}" bindinput="onAmount" />
       <text class="hint">请以小票为准。税额、归属和优惠仍在手动录入页设置。</text>

@@ -1,12 +1,27 @@
 const { previewSettlement, uploadReceipt, getReceiptJob } = require("../../services/api")
 Page({
-  data: { tripId: "", currency: "CNY", amount: "", payer: "我", friend: "", allocationIndex: 0, allocationLabels: ["付款人自己买", "同行人自己买", "两人均分"], receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传" },
+  data: { tripId: "", currency: "CNY", amount: "", sourceText: "", translatedText: "", payer: "我", friend: "", allocationIndex: 0, allocationLabels: ["付款人自己买", "同行人自己买", "两人均分"], receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传" },
   onLoad(q) { this.setData({ tripId: q.tripId, currency: q.currency }) },
   chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); this.startOcr(tempFilePath) } }) }) },
-  startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) }, pollOcr(jobId) { getReceiptJob(jobId).then((job) => { const labels = { queued: "排队识别中", processing: "正在识别", needs_review: "待核对", failed: "识别失败，可手动录入" }; this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: job.status === "needs_review" ? job.candidates : [] }); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }) },
+  startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) },
+  pollOcr(jobId) {
+    getReceiptJob(jobId).then((job) => {
+      const labels = { queued: "排队识别中", processing: "正在识别", needs_review: "待核对", failed: "识别失败，可手动录入" }
+      const candidates = job.status === "needs_review" ? (job.candidates || []) : []
+      this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: candidates })
+      if (job.status === "needs_review") this.openOcrReview(candidates, job.error_code || "")
+      if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500)
+    }).catch(() => this.setData({ ocrStatus: "识别状态查询失败，可手动录入" }))
+  },
+  openOcrReview(candidates = this.data.ocrCandidates, errorCode = "") {
+    wx.navigateTo({
+      url: `/pages/ocr-review/index?status=needs_review&errorCode=${encodeURIComponent(errorCode)}&candidates=${encodeURIComponent(JSON.stringify(candidates))}`,
+      events: { ocrCandidateConfirmed: ({ sourceText, translatedText, amount }) => this.setData({ sourceText, translatedText, amount }) },
+    })
+  },
   onTaxIncluded(e) { this.setData({ taxIncluded: e.detail.value }) },
   onTax(e) { this.setData({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.setData({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.setData({ adjustmentType: Number(e.detail.value) }) },
-  onAmount(e) { this.setData({ amount: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onAllocation(e) { this.setData({ allocationIndex: Number(e.detail.value) }) },
+  onSourceText(e) { this.setData({ sourceText: e.detail.value }) }, onTranslatedText(e) { this.setData({ translatedText: e.detail.value }) }, onAmount(e) { this.setData({ amount: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onAllocation(e) { this.setData({ allocationIndex: Number(e.detail.value) }) },
   preview() {
     const { tripId, currency, amount, payer, friend, allocationIndex, taxAmount, adjustmentAmount, adjustmentType, taxIncluded } = this.data
     if (!amount || !payer) return wx.showToast({ title: "请填写金额和付款人", icon: "none" })

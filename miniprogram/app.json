@@ -1,1 +1,1 @@
-{"pages":["pages/trips/index","pages/expense/index","pages/settlement/index"],"window":{"navigationBarTitleText":"旅账","navigationBarBackgroundColor":"#173C48","navigationBarTextStyle":"white","backgroundColor":"#F3F0E8"}}
+{"pages":["pages/trips/index","pages/expense/index","pages/ocr-review/index","pages/settlement/index"],"window":{"navigationBarTitleText":"旅账","navigationBarBackgroundColor":"#173C48","navigationBarTextStyle":"white","backgroundColor":"#F3F0E8"}}

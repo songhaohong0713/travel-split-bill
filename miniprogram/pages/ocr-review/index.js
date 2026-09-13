@@ -15,10 +15,12 @@ function amountFromText(value) {
 }
 
 function candidateFrom(value, index) {
-  const sourceText = typeof value === "string" ? value.trim() : String(value && value.text || "").trim()
+  const sourceText = typeof value === "string" ? value.trim() : String(value && (value.source_text || value.text) || "").trim()
+  const translatedText = typeof value === "string" ? "" : String(value && (value.translated_text || value.translation) || "").trim()
   return {
     id: String(index),
     sourceText,
+    translatedText,
     amount: amountFromText(sourceText),
   }
 }
@@ -27,6 +29,7 @@ Page({
   data: {
     candidates: [],
     sourceText: "",
+    translatedText: "",
     amount: "",
     status: "needs_review",
     errorCode: "",
@@ -45,10 +48,11 @@ Page({
   chooseCandidate(event) {
     const item = this.data.candidates.find((candidate) => candidate.id === event.currentTarget.dataset.id)
     if (!item) return
-    this.setData({ selectedId: item.id, sourceText: item.sourceText, amount: item.amount })
+    this.setData({ selectedId: item.id, sourceText: item.sourceText, translatedText: item.translatedText, amount: item.amount })
   },
 
   onSourceText(event) { this.setData({ sourceText: event.detail.value }) },
+  onTranslatedText(event) { this.setData({ translatedText: event.detail.value }) },
   onAmount(event) { this.setData({ amount: event.detail.value }) },
 
   applyManualItem() {
@@ -59,7 +63,7 @@ Page({
       return
     }
     const channel = this.getOpenerEventChannel && this.getOpenerEventChannel()
-    if (channel && channel.emit) channel.emit("ocrCandidateConfirmed", { sourceText, amount })
+    if (channel && channel.emit) channel.emit("ocrCandidateConfirmed", { sourceText, translatedText: this.data.translatedText.trim(), amount })
     wx.navigateBack()
   },
 
