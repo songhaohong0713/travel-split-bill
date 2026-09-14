@@ -3,18 +3,23 @@ import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Any
+from uuid import uuid4
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from jwt import InvalidTokenError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from app.db.models import RefreshToken, User
-from app.db.session import get_session
+from app.db.session import SessionLocal
+from app.providers.cloudbase_pg import (
+    CloudBasePgClient,
+    CloudBasePgConfigurationError,
+    CloudBasePgUnavailable,
+)
 from app.providers.wechat_auth import WechatAuthError
 
 JWT_ALGORITHM = "HS256"
@@ -57,8 +62,16 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _issue_tokens(session: Session, user_id: str) -> dict[str, str]:
-    refresh_token = secrets.token_urlsafe(32)
+def _new_refresh_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _tokens(user_id: str, refresh_token: str) -> dict[str, str]:
+    return {"access_token": create_access_token(user_id), "refresh_token": refresh_token}
+
+
+def _issue_tokens(session: Any, user_id: str) -> dict[str, str]:
+    refresh_token = _new_refresh_token()
     session.add(
         RefreshToken(
             token_hash=_hash(refresh_token),
@@ -66,17 +79,19 @@ def _issue_tokens(session: Session, user_id: str) -> dict[str, str]:
             expires_at=_now() + timedelta(days=30),
         )
     )
-    return {
-        "access_token": create_access_token(user_id),
-        "refresh_token": refresh_token,
-    }
+    return _tokens(user_id, refresh_token)
+
+
+def _cloudbase_error(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
+    )
 
 
 @router.post("/wechat")
 async def wechat_login(
-    request: Request,
-    body: WechatLoginRequest,
-    session: Annotated[Session, Depends(get_session)],
+    request: Request, body: WechatLoginRequest
 ) -> dict[str, dict[str, str]]:
     provider: Any | None = getattr(request.app.state, "wechat_auth", None)
     if provider is None:
@@ -90,31 +105,83 @@ async def wechat_login(
         logger.warning("WeChat code2Session failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "WECHAT_LOGIN_FAILED", "message": "微信登录验证失败，请检查服务配置"},
+            detail={
+                "code": "WECHAT_LOGIN_FAILED",
+                "message": "微信登录验证失败，请检查服务配置",
+            },
         ) from exc
+
+    cloudbase: CloudBasePgClient | None = getattr(request.app.state, "cloudbase_pg", None)
     openid_hash = _hash(openid)
-    user = session.scalar(select(User).where(User.wechat_openid_hash == openid_hash))
-    if user is None:
-        user = User(id=secrets.token_urlsafe(18), wechat_openid_hash=openid_hash)
-        session.add(user)
-        session.flush()
-    tokens = _issue_tokens(session, user.id)
-    session.commit()
-    return {"data": tokens}
+    if cloudbase is not None:
+        refresh_token = _new_refresh_token()
+        proposed_user_id = secrets.token_urlsafe(18)
+        try:
+            result = await cloudbase.rpc(
+                "tsb_upsert_wechat_user_and_issue_refresh_token",
+                {
+                    "p_openid_hash": openid_hash,
+                    "p_user_id": proposed_user_id,
+                    "p_refresh_id": str(uuid4()),
+                    "p_token_hash": _hash(refresh_token),
+                    "p_expires_at": (_now() + timedelta(days=30)).isoformat(),
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        user_id = result.get("user_id") if isinstance(result, dict) else None
+        if not isinstance(user_id, str) or not user_id:
+            raise _cloudbase_error(ValueError("invalid CloudBase auth response"))
+        return {"data": _tokens(user_id, refresh_token)}
+
+    # Local test fallback. Production configures ``cloudbase_pg`` during lifespan.
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.wechat_openid_hash == openid_hash))
+        if user is None:
+            user = User(id=secrets.token_urlsafe(18), wechat_openid_hash=openid_hash)
+            session.add(user)
+            session.flush()
+        tokens = _issue_tokens(session, user.id)
+        session.commit()
+        return {"data": tokens}
 
 
 @router.post("/refresh")
-def refresh(
-    body: RefreshRequest, session: Annotated[Session, Depends(get_session)]
-) -> dict[str, dict[str, str]]:
-    record = session.scalar(
-        select(RefreshToken).where(RefreshToken.token_hash == _hash(body.refresh_token))
-    )
-    if record is None or record.revoked_at is not None or record.expires_at <= _now():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token"
+async def refresh(body: RefreshRequest, request: Request) -> dict[str, dict[str, str]]:
+    cloudbase: CloudBasePgClient | None = getattr(request.app.state, "cloudbase_pg", None)
+    if cloudbase is not None:
+        refresh_token = _new_refresh_token()
+        try:
+            result = await cloudbase.rpc(
+                "tsb_rotate_refresh_token",
+                {
+                    "p_old_token_hash": _hash(body.refresh_token),
+                    "p_refresh_id": str(uuid4()),
+                    "p_new_token_hash": _hash(refresh_token),
+                    "p_expires_at": (_now() + timedelta(days=30)).isoformat(),
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        user_id = result.get("user_id") if isinstance(result, dict) else None
+        if not isinstance(result, dict) or not result.get("valid") or not isinstance(user_id, str):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token"
+            )
+        return {"data": _tokens(user_id, refresh_token)}
+
+    # Local test fallback. Production configures ``cloudbase_pg`` during lifespan.
+    with SessionLocal() as session:
+        record = session.scalar(
+            select(RefreshToken).where(
+                RefreshToken.token_hash == _hash(body.refresh_token)
+            )
         )
-    record.revoked_at = _now()
-    tokens = _issue_tokens(session, record.user_id)
-    session.commit()
-    return {"data": tokens}
+        if record is None or record.revoked_at is not None or record.expires_at <= _now():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token"
+            )
+        record.revoked_at = _now()
+        tokens = _issue_tokens(session, record.user_id)
+        session.commit()
+        return {"data": tokens}
