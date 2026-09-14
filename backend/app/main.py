@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -9,8 +11,28 @@ from app.api.v1.shares import router as shares_router
 from app.api.v1.trips import router as trips_router
 from app.api.v1.uploads import router as uploads_router
 from app.db import session as database
+from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    configure_wechat_auth()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+def configure_wechat_auth() -> None:
+    """Attach the production WeChat code2Session provider when configured."""
+    if getattr(app.state, "wechat_auth", None) is not None:
+        return
+    try:
+        app.state.wechat_auth = WechatCode2Session.from_environment()
+    except WechatAuthError:
+        # Local development and health endpoints remain available without WeChat credentials.
+        return
+
 app.include_router(auth_router)
 app.include_router(trips_router)
 app.include_router(settlements_router)

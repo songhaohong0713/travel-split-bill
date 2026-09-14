@@ -3,8 +3,10 @@ from datetime import date
 
 import httpx
 import pytest
+from app.main import app, configure_wechat_auth
 from app.providers.rates import FrankfurterRates, RateUnavailable
 from app.providers.receipt_ocr import parse_text_lines
+from app.providers.wechat_auth import WechatCode2Session
 
 
 def test_historical_rate_keeps_decimal_and_effective_date():
@@ -38,3 +40,16 @@ def test_receipt_candidate_parser_does_not_treat_total_or_tax_as_product():
     assert result["total_candidate"] == "378"
     assert result["tax_candidate"] == "28"
     assert result["requires_review"] is True
+
+def test_configure_wechat_auth_uses_cloudbase_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("WECHAT_APP_ID", "wx-test-app-id")
+    monkeypatch.setenv("WECHAT_APP_SECRET", "test-app-secret")
+    if hasattr(app.state, "wechat_auth"):
+        delattr(app.state, "wechat_auth")
+
+    configure_wechat_auth()
+
+    provider = app.state.wechat_auth
+    assert isinstance(provider, WechatCode2Session)
+    assert provider.app_id == "wx-test-app-id"
+    assert provider.app_secret == "test-app-secret"
