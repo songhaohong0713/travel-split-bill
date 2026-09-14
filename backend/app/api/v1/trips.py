@@ -1,14 +1,20 @@
 import json
 from datetime import date
-from uuid import UUID
+from typing import Any, cast
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, User
+from app.providers.cloudbase_pg import (
+    CloudBasePgClient,
+    CloudBasePgConfigurationError,
+    CloudBasePgUnavailable,
+)
 
 router = APIRouter(prefix="/v1", tags=["trips"])
 
@@ -36,20 +42,55 @@ def _not_found() -> HTTPException:
     )
 
 
+def _cloudbase_error(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
+    )
+
+
 def _ensure_user(session: DbSession, user_id: str) -> None:
     if session.get(User, user_id) is None:
         session.add(User(id=user_id, wechat_openid_hash=None))
         session.flush()
 
 
+def _cloudbase(request: Request) -> CloudBasePgClient | None:
+    return getattr(request.app.state, "cloudbase_pg", None)
+
+
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
-def create_trip(
-    request: CreateTripRequest, session: DbSession, user_id: CurrentUser
+async def create_trip(
+    body: CreateTripRequest, http_request: Request, session: DbSession, user_id: CurrentUser
 ) -> dict[str, dict[str, str]]:
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        trip_id = str(uuid4())
+        try:
+            result = await cloudbase.rpc(
+                "tsb_create_trip",
+                {
+                    "p_trip_id": trip_id,
+                    "p_owner_id": user_id,
+                    "p_name": body.name,
+                    "p_default_currency": body.default_currency,
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict):
+            raise _cloudbase_error(ValueError("invalid CloudBase trip response"))
+        typed_result = cast(dict[str, Any], result)
+        return {
+            "data": {
+                "id": str(typed_result["id"]),
+                "name": str(typed_result["name"]),
+                "default_currency": str(typed_result["default_currency"]),
+            }
+        }
+
     _ensure_user(session, user_id)
-    trip = Trip(
-        owner_id=user_id, name=request.name, default_currency=request.default_currency
-    )
+    trip = Trip(owner_id=user_id, name=body.name, default_currency=body.default_currency)
     session.add(trip)
     session.commit()
     return {
@@ -62,9 +103,37 @@ def create_trip(
 
 
 @router.get("/trips")
-def list_trips(
-    session: DbSession, user_id: CurrentUser
+async def list_trips(
+    http_request: Request, session: DbSession, user_id: CurrentUser
 ) -> dict[str, list[dict[str, str]]]:
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            rows = await cloudbase.request(
+                "GET",
+                "/trips",
+                params={
+                    "owner_id": f"eq.{user_id}",
+                    "select": "id,name,default_currency",
+                    "order": "created_at.asc,id.asc",
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(rows, list):
+            raise _cloudbase_error(ValueError("invalid CloudBase trip response"))
+        typed_rows = cast(list[dict[str, Any]], rows)
+        return {
+            "data": [
+                {
+                    "id": str(row["id"]),
+                    "name": str(row["name"]),
+                    "default_currency": str(row["default_currency"]),
+                }
+                for row in typed_rows
+            ]
+        }
+
     trips = session.scalars(
         select(Trip).where(Trip.owner_id == user_id).order_by(Trip.created_at, Trip.id)
     ).all()
@@ -81,12 +150,40 @@ def list_trips(
 
 
 @router.get("/trips/{trip_id}/expenses")
-def list_expenses(
-    trip_id: str, session: DbSession, user_id: CurrentUser
+async def list_expenses(
+    trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
 ) -> dict[str, list[dict[str, object]]]:
-    trip = session.scalar(
-        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
-    )
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            rows = await cloudbase.request(
+                "GET",
+                "/expenses",
+                params={
+                    "trip_id": f"eq.{trip_id}",
+                    "owner_id": f"eq.{user_id}",
+                    "select": "id,revision,occurred_at,payload_json",
+                    "order": "created_at.asc",
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(rows, list):
+            raise _cloudbase_error(ValueError("invalid CloudBase expense response"))
+        typed_rows = cast(list[dict[str, Any]], rows)
+        return {
+            "data": [
+                {
+                    "id": str(row["id"]),
+                    "revision": int(row["revision"]),
+                    "occurred_at": str(row["occurred_at"]),
+                    "payload": row["payload_json"],
+                }
+                for row in typed_rows
+            ]
+        }
+
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
     if trip is None:
         raise _not_found()
     expenses = session.scalars(
@@ -108,9 +205,10 @@ def list_expenses(
 
 
 @router.post("/trips/{trip_id}/expenses", status_code=status.HTTP_201_CREATED)
-def create_expense(
+async def create_expense(
     trip_id: str,
-    request: CreateExpenseRequest,
+    body: CreateExpenseRequest,
+    http_request: Request,
     session: DbSession,
     user_id: CurrentUser,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
@@ -127,9 +225,39 @@ def create_expense(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "IDEMPOTENCY_KEY_INVALID", "message": "幂等键格式无效"},
         ) from exc
-    trip = session.scalar(
-        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
-    )
+
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        expense_id = str(uuid4())
+        response = {
+            "data": {
+                "id": expense_id,
+                "revision": 1,
+                "occurred_at": body.occurred_at.isoformat(),
+                "payload": body.payload,
+            }
+        }
+        try:
+            result = await cloudbase.rpc(
+                "tsb_create_expense_with_idempotency",
+                {
+                    "p_expense_id": expense_id,
+                    "p_trip_id": trip_id,
+                    "p_owner_id": user_id,
+                    "p_occurred_at": body.occurred_at.isoformat(),
+                    "p_payload": body.payload,
+                    "p_key": idempotency_key,
+                    "p_response": response,
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get("not_found"):
+            raise _not_found()
+        persisted = result.get("response", response)
+        return JSONResponse(status_code=status.HTTP_201_CREATED, content=persisted)
+
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
     if trip is None:
         raise _not_found()
     existing = session.scalar(
@@ -145,8 +273,8 @@ def create_expense(
     expense = ExpenseRecord(
         trip_id=trip_id,
         owner_id=user_id,
-        occurred_at=request.occurred_at,
-        payload_json=request.payload,
+        occurred_at=body.occurred_at,
+        payload_json=body.payload,
     )
     session.add(expense)
     session.flush()
@@ -171,16 +299,43 @@ def create_expense(
 
 
 @router.patch("/trips/{trip_id}/expenses/{expense_id}")
-def update_expense(
+async def update_expense(
     trip_id: str,
     expense_id: str,
-    request: UpdateExpenseRequest,
+    body: UpdateExpenseRequest,
+    http_request: Request,
     session: DbSession,
     user_id: CurrentUser,
 ) -> dict[str, dict[str, object]]:
-    trip = session.scalar(
-        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
-    )
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            result = await cloudbase.rpc(
+                "tsb_update_expense_revision",
+                {
+                    "p_expense_id": expense_id,
+                    "p_trip_id": trip_id,
+                    "p_owner_id": user_id,
+                    "p_revision": body.revision,
+                    "p_occurred_at": body.occurred_at.isoformat(),
+                    "p_payload": body.payload,
+                },
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict):
+            raise _cloudbase_error(ValueError("invalid CloudBase update response"))
+        typed_result = cast(dict[str, Any], result)
+        return {
+            "data": {
+                "id": str(typed_result["id"]),
+                "revision": int(typed_result["revision"]),
+                "occurred_at": str(typed_result["occurred_at"]),
+                "payload": typed_result["payload"],
+            }
+        }
+
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
     if trip is None:
         raise _not_found()
     expense = session.scalar(
@@ -198,12 +353,12 @@ def update_expense(
             ExpenseRecord.id == expense_id,
             ExpenseRecord.owner_id == user_id,
             ExpenseRecord.trip_id == trip_id,
-            ExpenseRecord.revision == request.revision,
+            ExpenseRecord.revision == body.revision,
         )
         .values(
-            occurred_at=request.occurred_at,
-            payload_json=request.payload,
-            revision=request.revision + 1,
+            occurred_at=body.occurred_at,
+            payload_json=body.payload,
+            revision=body.revision + 1,
         )
     )
     if getattr(result, "rowcount", 0) != 1:
