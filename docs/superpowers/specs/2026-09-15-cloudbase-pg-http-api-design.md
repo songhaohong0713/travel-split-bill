@@ -43,7 +43,7 @@ Read-only work uses PostgREST table queries. State changes that previously requi
 - `tsb_update_expense_revision`
 - `tsb_publish_settlement_version`
 - `tsb_create_share_link`
-- `tsb_create_receipt_image_and_job`
+- `tsb_create_receipt_image`, `tsb_mark_receipt_uploaded`, `tsb_create_receipt_job`, `tsb_claim_receipt_job`
 
 Each function validates the service role before modifying data, uses a single database transaction, returns the response payload required by the existing backend endpoint, and is called through `/v1/rdb/rest/rpc/<function>`. The migration SQL grants `service_role` table and function permissions, revokes public execute permissions, and preserves the existing tables and data.
 

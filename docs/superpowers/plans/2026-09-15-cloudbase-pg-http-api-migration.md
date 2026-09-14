@@ -96,7 +96,7 @@ git commit -m "Add CloudBase PostgreSQL HTTP client"
 - Create: `backend/tests/unit/test_cloudbase_migration_contract.py`
 
 **Interfaces:**
-- Produces database RPCs `tsb_upsert_wechat_user_and_issue_refresh_token`, `tsb_rotate_refresh_token`, `tsb_create_trip`, `tsb_create_expense_with_idempotency`, `tsb_update_expense_revision`, `tsb_publish_settlement_version`, `tsb_create_share_link`, `tsb_create_receipt_image_and_job`.
+- Produces database RPCs `tsb_upsert_wechat_user_and_issue_refresh_token`, `tsb_rotate_refresh_token`, `tsb_create_trip`, `tsb_create_expense_with_idempotency`, `tsb_update_expense_revision`, `tsb_publish_settlement_version`, `tsb_create_share_link`, `tsb_create_receipt_image`, `tsb_mark_receipt_uploaded`, `tsb_create_receipt_job`, `tsb_claim_receipt_job`.
 - Every RPC accepts `p_` prefixed JSON-safe input fields and returns one JSONB object.
 
 - [ ] **Step 1: Write migration contract tests**
