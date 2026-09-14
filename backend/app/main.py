@@ -2,26 +2,37 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.trips import router as trips_router
 from app.api.v1.uploads import router as uploads_router
-from app.db import session as database
+from app.providers.cloudbase_pg import (
+    CloudBasePgClient,
+    CloudBasePgConfigurationError,
+    CloudBasePgUnavailable,
+)
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_wechat_auth()
+    configure_cloudbase_pg()
     yield
 
 
 app = FastAPI(lifespan=lifespan)
 
+
+def configure_cloudbase_pg() -> None:
+    if getattr(app.state, "cloudbase_pg", None) is not None:
+        return
+    try:
+        app.state.cloudbase_pg = CloudBasePgClient.from_environment()
+    except CloudBasePgConfigurationError:
+        app.state.cloudbase_pg = None
 
 def configure_wechat_auth() -> None:
     """Attach the production WeChat code2Session provider when configured."""
@@ -55,13 +66,26 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/readyz")
-def readyz() -> dict[str, str]:
-    try:
-        with database.engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-    except SQLAlchemyError as exc:
+async def readyz() -> dict[str, str]:
+    client: CloudBasePgClient | None = getattr(app.state, "cloudbase_pg", None)
+    if client is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "DATABASE_UNAVAILABLE", "message": "Database is unavailable"},
+            detail={
+                "code": "DATABASE_CONFIGURATION_INVALID",
+                "message": "CloudBase PostgreSQL is not configured",
+            },
+        )
+    try:
+        await client.request("GET", "/trips", params={"select": "id", "limit": "1"})
+    except CloudBasePgConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DATABASE_CONFIGURATION_INVALID", "message": "CloudBase PostgreSQL authorization failed"},
+        ) from exc
+    except CloudBasePgUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
         ) from exc
     return {"status": "ready"}
