@@ -22,5 +22,5 @@ def test_migration_defines_all_mutation_rpcs():
     for name in REQUIRED_RPCS:
         assert f"FUNCTION public.{name}" in sql
     assert "REVOKE ALL ON FUNCTION" in sql
-    assert "GRANT EXECUTE ON ALL FUNCTIONS" in sql
+    assert "GRANT EXECUTE ON FUNCTION" in sql
     assert "service_role" in sql
