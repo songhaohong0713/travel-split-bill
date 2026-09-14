@@ -3,6 +3,7 @@ from collections.abc import Generator
 import pytest
 from app.db.session import configure_database, create_schema, drop_schema
 from app.main import app
+from app.providers.wechat_auth import WechatAuthError
 from fastapi.testclient import TestClient
 
 
@@ -43,3 +44,16 @@ def test_refresh_token_cannot_be_reused_after_rotation(client: TestClient) -> No
     reused = client.post("/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
 
     assert reused.status_code == 401
+
+class FailingWechatAuth:
+    async def openid_for_code(self, code: str) -> str:
+        raise WechatAuthError("WeChat login failed (40125): invalid app secret")
+
+
+def test_wechat_login_returns_safe_auth_error_for_provider_failure(client: TestClient) -> None:
+    app.state.wechat_auth = FailingWechatAuth()
+
+    response = client.post("/v1/auth/wechat", json={"code": "wechat-login-code"})
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "WECHAT_LOGIN_FAILED"

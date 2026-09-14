@@ -35,5 +35,11 @@ class WechatCode2Session:
         payload: Any = response.json()
         openid = payload.get("openid") if isinstance(payload, dict) else None
         if not isinstance(openid, str) or not openid:
+            error_code = payload.get("errcode") if isinstance(payload, dict) else None
+            error_message = payload.get("errmsg") if isinstance(payload, dict) else None
+            if error_code is not None:
+                raise WechatAuthError(
+                    f"WeChat login failed (errcode={error_code}): {error_message or 'unknown error'}"
+                )
             raise WechatAuthError("WeChat login failed")
         return openid

@@ -1,9 +1,11 @@
 import hashlib
+import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jwt import InvalidTokenError
@@ -13,9 +15,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import RefreshToken, User
 from app.db.session import get_session
+from app.providers.wechat_auth import WechatAuthError
 
 JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.getenv("JWT_SECRET", "development-only-secret-key-not-prod-32")
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
@@ -80,7 +84,14 @@ async def wechat_login(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="wechat login unavailable",
         )
-    openid = await provider.openid_for_code(body.code)
+    try:
+        openid = await provider.openid_for_code(body.code)
+    except (WechatAuthError, httpx.HTTPError) as exc:
+        logger.warning("WeChat code2Session failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "WECHAT_LOGIN_FAILED", "message": "微信登录验证失败，请检查服务配置"},
+        ) from exc
     openid_hash = _hash(openid)
     user = session.scalar(select(User).where(User.wechat_openid_hash == openid_hash))
     if user is None:

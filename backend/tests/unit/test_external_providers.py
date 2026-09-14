@@ -6,7 +6,7 @@ import pytest
 from app.main import app, configure_wechat_auth
 from app.providers.rates import FrankfurterRates, RateUnavailable
 from app.providers.receipt_ocr import parse_text_lines
-from app.providers.wechat_auth import WechatCode2Session
+from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 
 
 def test_historical_rate_keeps_decimal_and_effective_date():
@@ -53,3 +53,14 @@ def test_configure_wechat_auth_uses_cloudbase_environment(monkeypatch: pytest.Mo
     assert isinstance(provider, WechatCode2Session)
     assert provider.app_id == "wx-test-app-id"
     assert provider.app_secret == "test-app-secret"
+
+def test_wechat_provider_reports_wechat_error_code():
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"errcode": 40125, "errmsg": "invalid app secret"})
+        )
+    )
+    provider = WechatCode2Session("wx-test", "secret", client)
+
+    with pytest.raises(WechatAuthError, match="40125"):
+        asyncio.run(provider.openid_for_code("temporary-code"))
