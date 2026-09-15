@@ -24,7 +24,8 @@ services:
       secretRef:
         name: travel-split-bill-secrets
         keys:
-          - DATABASE_URL
+          - CLOUDBASE_ENV_ID
+          - CLOUDBASE_API_KEY
           - JWT_SECRET
           - WECHAT_APP_ID
           - WECHAT_APP_SECRET

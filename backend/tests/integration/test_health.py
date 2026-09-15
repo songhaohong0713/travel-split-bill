@@ -1,6 +1,14 @@
+import pytest
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def reset_cloudbase_state():
+    if hasattr(app.state, "cloudbase_pg"):
+        delattr(app.state, "cloudbase_pg")
+    yield
+    if hasattr(app.state, "cloudbase_pg"):
+        delattr(app.state, "cloudbase_pg")
 class HealthyCloudBase:
     async def request(self, method: str, path: str, **kwargs):
         assert method == "GET"

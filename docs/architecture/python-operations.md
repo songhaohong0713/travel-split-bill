@@ -59,7 +59,8 @@ docker run --rm -e PORT=8080 -p 8080:8080 travel-split-api:local
 
 | 环境变量 | 用途 |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL SQLAlchemy 连接串，例如 `postgresql+psycopg://<user>:<password>@<host>:5432/<database>?sslmode=require` |
+| `CLOUDBASE_ENV_ID` | CloudBase 环境 ID，例如 `travel-split-bill` |
+| `CLOUDBASE_API_KEY` | 控制台“环境管理 → API 密钥”创建的 `api_key`；仅服务端 Secret 保存 |
 | `JWT_SECRET` | access token 签名密钥，使用随机高强度值 |
 | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信 `code2session` 配置 |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` | 服务端访问私有 COS；后续应迁移为 CAM 临时凭证/最小权限角色 |
@@ -69,21 +70,14 @@ docker run --rm -e PORT=8080 -p 8080:8080 travel-split-api:local
 | `OCR_MAX_ATTEMPTS` | OCR 最大尝试次数，默认 3 |
 | `CORS_ORIGINS` | 分享 H5 或受信任前端来源；生产不可设为 `*` |
 
-当前 CloudBase PostgreSQL 共享实例页面若还未提供可供云托管使用的主机、数据库名、账号和密码，就**不要猜测或伪造** `DATABASE_URL`，也不要发布 API。先在 CloudBase 文档/控制台确认该实例的云托管连接方式，或创建一个可提供连接凭据的 PostgreSQL 实例；拿到凭据后才创建 `DATABASE_URL` Secret。
+共享 PostgreSQL 不使用直连账号密码。服务通过 CloudBase PostgreSQL HTTP API 访问数据，因此必须在云托管变量中设置 `CLOUDBASE_ENV_ID` 与 `CLOUDBASE_API_KEY`；不要配置或猜测 `DATABASE_URL`。
 
 `backend/Dockerfile` 在运行镜像中安装 `psycopg`，因此 DSN 必须使用 `postgresql+psycopg://`，不能使用 `mysql+pymysql://`。
 
 ## 首次迁移与发布顺序
 
-1. 确认 PostgreSQL 连接凭据，并在 CloudBase Secret 创建 `DATABASE_URL` 和其余必需变量。
-2. 用与 API 相同的 `DATABASE_URL` 一次性运行迁移：
-
-   ```sh
-   cd backend
-   alembic upgrade head
-   ```
-
-   迁移不能作为每次 API 容器启动动作。若 CloudBase 尚无受控的一次性任务方式，应在受控网络环境执行，而不是在应用启动时自动建表。
+1. 在 CloudBase PostgreSQL 的 SQL 编辑器执行 `infra/cloudbase/cloudbase_http_api_migration.sql`，保留成功记录。
+2. 在云托管当前版本环境变量设置 `CLOUDBASE_ENV_ID`、`CLOUDBASE_API_KEY`、`JWT_SECRET`、`WECHAT_APP_ID`、`WECHAT_APP_SECRET` 和 `PORT=8080`。
 3. 使用上表部署 `travel-split-api`，确认 CloudBase 日志无数据库/环境变量异常。
 4. 请求服务公开 HTTPS 地址的 `/healthz`，确认 HTTP 200 和 `{"status":"ok"}`。
 5. 再配置小程序合法 request 域名；COS 桶维持私有，不需配置 CDN 或公开读。
