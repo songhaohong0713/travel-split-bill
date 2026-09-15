@@ -1,4 +1,6 @@
-from fastapi import APIRouter, status
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -14,6 +16,11 @@ from app.core.settlement import (
     calculate_settlement,
 )
 from app.db.models import SettlementVersion, Trip
+from app.providers.cloudbase_pg import (
+    CloudBasePgClient,
+    CloudBasePgConfigurationError,
+    CloudBasePgUnavailable,
+)
 
 router = APIRouter(prefix="/v1", tags=["settlements"])
 
@@ -100,88 +107,56 @@ class PreviewRequest(BaseModel):
 def _money(money: Money) -> dict[str, str]:
     return {"currency": money.currency, "amount": money.amount}
 
+def _cloudbase(request: Request) -> CloudBasePgClient | None:
+    return getattr(request.app.state, "cloudbase_pg", None)
+
+def _cloudbase_error(exc: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
+    )
+
+
 
 @router.post("/trips/{trip_id}/settlements/preview")
-def preview_settlement(
-    trip_id: str, request: PreviewRequest, session: DbSession, user_id: CurrentUser
+async def preview_settlement(
+    trip_id: str, body: PreviewRequest, http_request: Request, session: DbSession, user_id: CurrentUser
 ) -> dict[str, object]:
-    trip = session.scalar(
-        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
-    )
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            rows = await cloudbase.request("GET", "/trips", params={"id": f"eq.{trip_id}", "owner_id": f"eq.{user_id}", "select": "id", "limit": "1"})
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(rows, list) or not rows:
+            raise _not_found()
+    else:
+        trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
+        if trip is None:
+            raise _not_found()
+    result = calculate_settlement(CalculateSettlementInput(settlement_currency=body.settlement_currency, participants=tuple(body.participants), expenses=tuple(expense.to_expense() for expense in body.expenses)))
+    return {"data": {"responsibility_by_participant": {key: _money(value) for key, value in result.responsibility_by_participant.items()}, "paid_by_participant": {key: _money(value) for key, value in result.paid_by_participant.items()}, "net_by_participant": {key: _money(value) for key, value in result.net_by_participant.items()}, "transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers], "audit_lines": [{"expense_id": line.expense_id, "participant_id": line.participant_id, "amount": _money(line.amount), "reason": line.reason, "rate_source": line.rate_source} for line in result.audit_lines]}}
+
+@router.post("/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED)
+async def publish_settlement(
+    trip_id: str, body: PreviewRequest, http_request: Request, session: DbSession, user_id: CurrentUser
+) -> dict[str, object]:
+    result = calculate_settlement(CalculateSettlementInput(settlement_currency=body.settlement_currency, participants=tuple(body.participants), expenses=tuple(expense.to_expense() for expense in body.expenses)))
+    projection = {"transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers]}
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        version_id = str(uuid4())
+        try:
+            response = await cloudbase.rpc("tsb_publish_settlement_version", {"p_version_id": version_id, "p_trip_id": trip_id, "p_owner_id": user_id, "p_result": projection, "p_public": projection})
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(response, dict) or response.get("not_found"):
+            raise _not_found()
+        return {"data": {"id": str(response["id"]), "trip_id": trip_id, "result": projection}}
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
     if trip is None:
         raise _not_found()
-    result = calculate_settlement(
-        CalculateSettlementInput(
-            settlement_currency=request.settlement_currency,
-            participants=tuple(request.participants),
-            expenses=tuple(expense.to_expense() for expense in request.expenses),
-        )
-    )
-    return {
-        "data": {
-            "responsibility_by_participant": {
-                key: _money(value)
-                for key, value in result.responsibility_by_participant.items()
-            },
-            "paid_by_participant": {
-                key: _money(value) for key, value in result.paid_by_participant.items()
-            },
-            "net_by_participant": {
-                key: _money(value) for key, value in result.net_by_participant.items()
-            },
-            "transfers": [
-                {
-                    "from_participant_id": transfer.from_participant_id,
-                    "to_participant_id": transfer.to_participant_id,
-                    "amount": _money(transfer.amount),
-                }
-                for transfer in result.transfers
-            ],
-            "audit_lines": [
-                {
-                    "expense_id": line.expense_id,
-                    "participant_id": line.participant_id,
-                    "amount": _money(line.amount),
-                    "reason": line.reason,
-                    "rate_source": line.rate_source,
-                }
-                for line in result.audit_lines
-            ],
-        }
-    }
-
-
-@router.post(
-    "/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED
-)
-def publish_settlement(
-    trip_id: str, request: PreviewRequest, session: DbSession, user_id: CurrentUser
-) -> dict[str, object]:
-    trip = session.scalar(
-        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
-    )
-    if trip is None:
-        raise _not_found()
-    result = calculate_settlement(
-        CalculateSettlementInput(
-            settlement_currency=request.settlement_currency,
-            participants=tuple(request.participants),
-            expenses=tuple(expense.to_expense() for expense in request.expenses),
-        )
-    )
-    projection = {
-        "transfers": [
-            {
-                "from_participant_id": transfer.from_participant_id,
-                "to_participant_id": transfer.to_participant_id,
-                "amount": _money(transfer.amount),
-            }
-            for transfer in result.transfers
-        ]
-    }
-    version = SettlementVersion(
-        trip_id=trip_id, result_json=projection, public_json=projection
-    )
+    version = SettlementVersion(trip_id=trip_id, result_json=projection, public_json=projection)
     session.add(version)
     session.flush()
     trip.latest_version_id = version.id
