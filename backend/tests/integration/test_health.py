@@ -9,6 +9,8 @@ def reset_cloudbase_state():
     yield
     if hasattr(app.state, "cloudbase_pg"):
         delattr(app.state, "cloudbase_pg")
+
+
 class HealthyCloudBase:
     async def request(self, method: str, path: str, **kwargs):
         assert method == "GET"

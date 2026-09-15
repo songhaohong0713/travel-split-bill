@@ -72,7 +72,6 @@ docker run --rm -e PORT=8080 -p 8080:8080 travel-split-api:local
 
 共享 PostgreSQL 不使用直连账号密码。服务通过 CloudBase PostgreSQL HTTP API 访问数据，因此必须在云托管变量中设置 `CLOUDBASE_ENV_ID` 与 `CLOUDBASE_API_KEY`；不要配置或猜测 `DATABASE_URL`。
 
-`backend/Dockerfile` 在运行镜像中安装 `psycopg`，因此 DSN 必须使用 `postgresql+psycopg://`，不能使用 `mysql+pymysql://`。
 
 ## 首次迁移与发布顺序
 
