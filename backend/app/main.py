@@ -11,6 +11,7 @@ from app.api.v1.uploads import router as uploads_router
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
+    CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
@@ -82,6 +83,14 @@ async def readyz() -> dict[str, str]:
         raise HTTPException(
             status_code=503,
             detail={"code": "DATABASE_CONFIGURATION_INVALID", "message": "CloudBase PostgreSQL authorization failed"},
+        ) from exc
+    except CloudBasePgRequestError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "DATABASE_REQUEST_REJECTED",
+                "message": f"CloudBase PostgreSQL rejected the readiness check (HTTP {exc.status_code})",
+            },
         ) from exc
     except CloudBasePgUnavailable as exc:
         raise HTTPException(

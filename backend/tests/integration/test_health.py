@@ -38,3 +38,20 @@ def test_readyz_verifies_cloudbase_connectivity(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
+class RejectedCloudBase:
+    async def request(self, method: str, path: str, **kwargs):
+        from app.providers.cloudbase_pg import CloudBasePgRequestError
+
+        raise CloudBasePgRequestError(404, "CloudBase PostgreSQL request was rejected")
+
+
+def test_readyz_reports_safe_cloudbase_rejection_status(client):
+    app.state.cloudbase_pg = RejectedCloudBase()
+
+    response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == {
+        "code": "DATABASE_REQUEST_REJECTED",
+        "message": "CloudBase PostgreSQL rejected the readiness check (HTTP 404)",
+    }
