@@ -43,3 +43,26 @@ def test_client_sends_bearer_key_and_maps_503_to_unavailable():
         asyncio.run(client.request("GET", "/trips"))
 
     assert captured["authorization"] == "Bearer server-key"
+
+def test_from_environment_uses_cloud_hosting_injected_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("CLOUDBASE_ENV_ID", "travel-split-bill")
+    monkeypatch.delenv("CLOUDBASE_API_KEY", raising=False)
+    monkeypatch.setenv("CLOUDBASE_APIKEY", "hosting-injected-key")
+
+    client = CloudBasePgClient.from_environment()
+
+    assert client._api_key == "hosting-injected-key"
+
+
+def test_from_environment_prefers_cloud_hosting_injected_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("CLOUDBASE_ENV_ID", "travel-split-bill")
+    monkeypatch.setenv("CLOUDBASE_API_KEY", "manual-key")
+    monkeypatch.setenv("CLOUDBASE_APIKEY", "hosting-injected-key")
+
+    client = CloudBasePgClient.from_environment()
+
+    assert client._api_key == "hosting-injected-key"

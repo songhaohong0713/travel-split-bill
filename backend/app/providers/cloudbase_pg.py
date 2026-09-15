@@ -35,7 +35,7 @@ class CloudBasePgClient:
     @classmethod
     def from_environment(cls) -> "CloudBasePgClient":
         env_id = os.getenv("CLOUDBASE_ENV_ID")
-        api_key = os.getenv("CLOUDBASE_API_KEY")
+        api_key = os.getenv("CLOUDBASE_APIKEY") or os.getenv("CLOUDBASE_API_KEY")
         if not env_id or not api_key:
             raise CloudBasePgConfigurationError(
                 "CloudBase environment ID and API key must be configured"
