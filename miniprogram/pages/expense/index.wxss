@@ -8,4 +8,12 @@
 .receipt { width: 100%; max-height: 500rpx; margin-bottom: 24rpx; border-radius: 16rpx; }
 .ocr-status { display: block; margin: 16rpx 0 28rpx; color: #C46642; font-size: 26rpx; }
 .ocr-card { margin: 22rpx 0; padding: 24rpx; background: #FFFDF6; border-left: 6rpx solid #C46642; border-radius: 12rpx; }
-.candidate { display: block; padding-top: 12rpx; color: #46585D; font-size: 27rpx; }
+.candidate { display: block; padding-top: 12rpx; color: #46585D; font-size: 27rpx; }.card { margin: 24rpx 0; padding: 28rpx; background: #FFFDF6; border-radius: 16rpx; }
+.section-title { display: block; margin-bottom: 16rpx; color: #173C48; font-size: 34rpx; font-weight: 700; }
+.label { display: block; margin-top: 14rpx; color: #46585D; font-size: 26rpx; }
+input, .picker { margin: 12rpx 0; padding: 20rpx; background: #F5F0E6; border-radius: 10rpx; }
+.item-card { margin: 20rpx 0; padding: 20rpx; border: 2rpx solid #D9E5DE; border-radius: 12rpx; }
+.item-head, .ratio-row { display: flex; align-items: center; gap: 12rpx; }
+.item-head button { margin-left: auto; }
+.ratio-row input { width: 110rpx; }
+.secondary { margin-top: 12rpx; color: #173C48; background: #D9E5DE; border-radius: 12rpx; }
