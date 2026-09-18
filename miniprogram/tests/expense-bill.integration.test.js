@@ -116,3 +116,24 @@ test("buildBillPayload applies a bill tax only once", () => {
   assert.equal(result.expenses[0].items.filter((item) => item.tax_amount).length, 1)
   assert.equal(result.expenses[0].items.find((item) => item.tax_amount).tax_amount.amount, "2.00")
 })
+
+test("bill summary counts selected items and includes adjustments", () => {
+  const { helpers } = loadExpensePage({})
+  const items = [
+    { selected: true, amount: "20" },
+    { selected: false, amount: "10" },
+  ]
+  assert.equal(helpers.selectedItemCount(items), 1)
+  assert.equal(helpers.billTotal(items, "2", false, "-3"), "29.00")
+})
+
+test("item selection refreshes the visual bill summary", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, {
+    items: [{ id: "a", selected: false, amount: "20" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+  instance.toggleItem({ currentTarget: { dataset: { id: "a" } } })
+  assert.equal(instance.data.selectedCount, 1)
+  assert.equal(instance.data.billTotal, "20.00")
+})
