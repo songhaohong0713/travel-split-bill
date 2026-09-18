@@ -1,1 +1,41 @@
-<view class="page"><text class="title">结算预览</text><text class="hint">以下建议已尽量减少转账次数。</text><block wx:if="{{transfers.length}}"><view wx:for="{{transfers}}" wx:key="from_participant_id" class="transfer"><text>{{item.from_participant_id}} → {{item.to_participant_id}}</text><text>{{item.amount.amount}} {{item.amount.currency}}</text></view></block><view wx:else class="empty">暂无需要转账的余额</view><button class="primary" bindtap="publish" loading="{{publishing}}" disabled="{{published || publishing}}">{{published ? "已发布结算版本" : "发布结算版本"}}</button><view class="share-card"><text class="label">链接有效期</text><picker range="{{expiryDays}}" value="{{expiryIndex}}" bindchange="onExpiryChange"><view class="picker">{{expiryDays[expiryIndex]}} 天</view></picker><button class="secondary" bindtap="share" loading="{{sharing}}" disabled="{{!published || sharing}}">创建分享链接</button><view wx:if="{{shareUrl}}" class="link-result"><text class="label">分享链接已复制</text><text class="share-url" selectable="true">{{shareUrl}}</text><text class="expires">有效至 {{shareExpiresAt}}</text><button class="copy" bindtap="copyShareLink">复制链接</button></view></view></view>
+<view class="page settlement-sheet">
+  <view class="settlement-hero">
+    <text class="kicker">TRAVEL SPLIT</text>
+    <text class="title">结算单</text>
+    <text class="subtitle">以下安排会尽量减少彼此之间的转账次数。</text>
+  </view>
+
+  <block wx:if="{{transfers.length}}">
+    <view class="transfer-list">
+      <text class="list-label">建议转账</text>
+      <view wx:for="{{transfers}}" wx:key="from_participant_id" class="transfer-card">
+        <view class="transfer-route"><text class="person-name">{{item.from_participant_id}}</text><text class="route-arrow">转给</text><text class="person-name">{{item.to_participant_id}}</text></view>
+        <view class="transfer-amount"><text class="amount-currency">{{item.amount.currency}}</text><text class="amount-value">¥{{item.amount.amount}}</text></view>
+      </view>
+    </view>
+  </block>
+  <view wx:else class="settled-state">
+    <text class="settled-mark">✓</text>
+    <text class="settled-title">已经结清</text>
+    <text class="settled-copy">这笔账不需要额外转账。</text>
+  </view>
+
+  <view class="publish-section">
+    <text class="section-title">确认这份结算单</text>
+    <text class="section-note">发布后可生成一条分享链接，方便同行人查看。</text>
+    <button class="publish-button" bindtap="publish" loading="{{publishing}}" disabled="{{published || publishing}}">{{published ? "已发布结算版本" : "发布结算版本"}}</button>
+  </view>
+
+  <view class="share-section">
+    <view class="share-heading"><text class="section-title">分享结算单</text><text wx:if="{{!published}}" class="share-status">发布后可用</text></view>
+    <text class="field-label">链接有效期</text>
+    <picker range="{{expiryDays}}" value="{{expiryIndex}}" bindchange="onExpiryChange"><view class="expiry-picker">{{expiryDays[expiryIndex]}} 天<text>⌄</text></view></picker>
+    <button class="share-button" bindtap="share" loading="{{sharing}}" disabled="{{!published || sharing}}">创建并复制链接</button>
+    <view wx:if="{{shareUrl}}" class="link-result">
+      <text class="field-label">链接已复制</text>
+      <text class="share-url" selectable="true">{{shareUrl}}</text>
+      <text class="expires">有效至 {{shareExpiresAt}}</text>
+      <button class="copy-button" bindtap="copyShareLink">再次复制</button>
+    </view>
+  </view>
+</view>

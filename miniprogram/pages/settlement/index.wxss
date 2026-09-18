@@ -1,1 +1,30 @@
-.page { padding: 48rpx 40rpx; background: #F3F0E8; min-height: 100vh; }.title { display:block; font-size:56rpx; font-weight:700; color:#173C48; }.hint { display:block; margin:16rpx 0 36rpx; color:#617176; }.transfer { margin:18rpx 0; padding:28rpx; display:flex; justify-content:space-between; background:#FFFDF6; border-radius:16rpx; color:#173C48; }.empty { padding:48rpx 0; color:#617176; text-align:center; }.primary,.secondary { margin-top:24rpx; border-radius:16rpx; }.primary { background:#173C48; color:#FFFDF6; }.secondary { background:#D9E5DE; color:#173C48; }.share-card { margin-top:40rpx; padding-top:8rpx; border-top:1rpx solid #D5D4CC; }.label { display:block; margin-top:24rpx; color:#617176; font-size:24rpx; }.picker { margin-top:12rpx; padding:22rpx 24rpx; color:#173C48; background:#FFFDF6; border-radius:14rpx; }.link-result { margin-top:28rpx; padding:24rpx; background:#E0ECE5; border-radius:16rpx; }.share-url { display:block; margin-top:12rpx; color:#173C48; font-size:24rpx; word-break:break-all; }.expires { display:block; margin-top:12rpx; color:#617176; font-size:22rpx; }.copy { margin-top:18rpx; color:#173C48; background:#FFFDF6; border-radius:12rpx; font-size:26rpx; }
+.settlement-sheet { min-height: 100vh; padding: 56rpx 32rpx 72rpx; box-sizing: border-box; background: #F4EFE5; color: #123E45; }
+.settlement-hero { margin: 8rpx 8rpx 42rpx; }
+.kicker { display: block; color: #C86D45; font-size: 20rpx; font-weight: 700; letter-spacing: 3rpx; }
+.title { display: block; margin-top: 14rpx; font-size: 62rpx; line-height: 1.15; font-weight: 700; letter-spacing: -2rpx; }
+.subtitle { display: block; margin-top: 16rpx; color: #66767A; font-size: 27rpx; line-height: 1.6; }
+.transfer-list, .settled-state, .publish-section, .share-section { margin-bottom: 26rpx; padding: 28rpx; background: #FFFDF8; border: 2rpx solid #E2DBCF; border-radius: 24rpx; box-sizing: border-box; }
+.list-label, .field-label, .section-note, .share-status, .expires { display: block; color: #66767A; font-size: 23rpx; }
+.transfer-card { display: flex; align-items: center; justify-content: space-between; padding: 26rpx 0; border-bottom: 2rpx solid #E6DFD5; }
+.transfer-card:last-child { padding-bottom: 0; border-bottom: 0; }
+.transfer-route { display: flex; flex-wrap: wrap; align-items: center; gap: 10rpx; max-width: 55%; font-size: 29rpx; }
+.person-name { font-weight: 600; }
+.route-arrow { color: #66767A; font-size: 22rpx; }
+.transfer-amount { text-align: right; white-space: nowrap; }
+.amount-currency { display: block; color: #66767A; font-size: 20rpx; }
+.amount-value { display: block; margin-top: 4rpx; color: #C86D45; font-size: 38rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
+.settled-state { padding: 54rpx 28rpx; text-align: center; background: #E8F0EA; border-color: #D0DED4; }
+.settled-mark { display: flex; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; margin: 0 auto 18rpx; color: #FFFDF8; background: #123E45; border-radius: 50%; font-size: 36rpx; }
+.settled-title { display: block; font-size: 36rpx; font-weight: 700; }
+.settled-copy { display: block; margin-top: 12rpx; color: #66767A; font-size: 26rpx; }
+.section-title { display: block; font-size: 32rpx; font-weight: 700; }
+.section-note { margin-top: 12rpx; line-height: 1.6; }
+.publish-button { margin-top: 24rpx; color: #FFFDF8; background: #123E45; border-radius: 16rpx; font-weight: 600; }
+.share-heading { display: flex; align-items: baseline; justify-content: space-between; }
+.expiry-picker { display: flex; align-items: center; justify-content: space-between; margin-top: 12rpx; padding: 20rpx 0; color: #123E45; border-bottom: 2rpx solid #D9D2C6; font-size: 29rpx; }
+.share-button { margin-top: 24rpx; color: #123E45; background: #DCEBE3; border-radius: 16rpx; font-weight: 600; }
+.link-result { margin-top: 24rpx; padding-top: 22rpx; border-top: 2rpx solid #D9D2C6; }
+.share-url { display: block; margin-top: 12rpx; color: #123E45; font-size: 23rpx; line-height: 1.55; word-break: break-all; }
+.expires { margin-top: 12rpx; }
+.copy-button { margin: 18rpx 0 0; padding: 0; color: #C86D45; background: transparent; font-size: 25rpx; text-align: left; }
+.copy-button::after { border: 0; }

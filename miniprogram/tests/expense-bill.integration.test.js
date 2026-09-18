@@ -144,3 +144,10 @@ test("expense page exposes receipt-book layout hooks", () => {
   assert.match(wxml, /class="batch-bar"/)
   assert.match(wxml, /class="checkout-bar"/)
 })
+
+test("settlement page exposes settlement-sheet layout hooks", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "settlement", "index.wxml"), "utf8")
+  assert.match(wxml, /class="[^"]*settlement-sheet"/)
+  assert.match(wxml, /class="settlement-hero"/)
+  assert.match(wxml, /已经结清/)
+})
