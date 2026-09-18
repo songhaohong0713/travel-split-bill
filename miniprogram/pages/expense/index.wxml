@@ -1,34 +1,55 @@
-<view class="page">
-  <text class="title">录入账单</text>
-  <text class="hint">添加多件商品，再批量选择商品进行分账。</text>
-  <text class="ocr-status">识别状态：{{ocrStatus}}</text>
-  <view wx:if="{{ocrCandidates.length}}" class="ocr-card"><text class="label">OCR 原文候选（请逐项核对）</text><text wx:for="{{ocrCandidates}}" wx:key="*this" class="candidate">{{item.text || item}}</text><button class="secondary" bindtap="openOcrReview">核对 OCR 候选</button></view>
-  <button class="camera" bindtap="chooseReceipt">拍小票或从相册选择</button>
-  <image wx:if="{{receiptPath}}" class="receipt" src="{{receiptPath}}" mode="widthFix"/>
-  <view class="card">
-    <text class="label">付款人</text><input placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/>
-    <text class="label">同行人</text><input placeholder="例如：小林" value="{{friend}}" bindinput="onFriend"/>
+<view class="page expense-page">
+  <view class="masthead">
+    <text class="kicker">TRAVEL SPLIT</text>
+    <text class="title">本次账单</text>
+    <text class="subtitle">把这张小票，记进共同的旅行账本。</text>
   </view>
-  <view class="card">
-    <text class="section-title">商品条目</text>
-    <view wx:for="{{items}}" wx:key="id" class="item-card">
-      <view class="item-head"><switch checked="{{item.selected}}" data-id="{{item.id}}" bindchange="toggleItem" color="#173C48"/><text>批量选择</text><button size="mini" data-id="{{item.id}}" bindtap="removeItem">删除</button></view>
-      <input placeholder="商品名称，例如：晚餐" value="{{item.name}}" data-id="{{item.id}}" bindinput="onItemName"/>
-      <input type="digit" placeholder="金额（{{currency}}）" value="{{item.amount}}" data-id="{{item.id}}" bindinput="onItemAmount"/>
-      <picker range="{{batchModes}}" value="{{item.allocationMode === 'payer' ? 0 : item.allocationMode === 'friend' ? 1 : item.allocationMode === 'split' ? 2 : 3}}" data-id="{{item.id}}" bindchange="onItemMode"><view class="picker">分账方式：{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</view></picker>
+  <view class="bill-summary">
+    <view class="summary-head"><text class="section-title">同行信息</text><text class="summary-note">2 人分账</text></view>
+    <view class="people-grid">
+      <view class="person-field"><text class="field-label">付款人</text><input placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
+      <view class="person-field"><text class="field-label">同行人</text><input placeholder="例如：小林" value="{{friend}}" bindinput="onFriend"/></view>
+    </view>
+  </view>
+  <view class="receipt-section">
+    <view class="receipt-copy"><text class="section-title">票据附件</text><text class="receipt-status">{{ocrStatus}}</text></view>
+    <button class="receipt-button" bindtap="chooseReceipt">拍小票 / 选照片</button>
+    <image wx:if="{{receiptPath}}" class="receipt" src="{{receiptPath}}" mode="widthFix"/>
+    <view wx:if="{{ocrCandidates.length}}" class="ocr-card">
+      <text class="field-label">待核对的识别内容</text>
+      <text wx:for="{{ocrCandidates}}" wx:key="*this" class="candidate">{{item.text || item}}</text>
+      <button class="text-button" bindtap="openOcrReview">去核对</button>
+    </view>
+  </view>
+  <view class="ticket-list">
+    <view class="list-heading"><text class="section-title">商品条目</text><text class="summary-note">共 {{items.length}} 项</text></view>
+    <view wx:for="{{items}}" wx:key="id" class="ticket-card {{item.selected ? 'is-selected' : ''}}">
+      <view class="ticket-topline">
+        <view class="select-mark"><switch checked="{{item.selected}}" data-id="{{item.id}}" bindchange="toggleItem" color="#123E45"/><text>批量选择</text></view>
+        <button class="remove-button" size="mini" disabled="{{items.length === 1}}" data-id="{{item.id}}" bindtap="removeItem">删除</button>
+      </view>
+      <input class="item-name" placeholder="商品名称，例如：晚餐" value="{{item.name}}" data-id="{{item.id}}" bindinput="onItemName"/>
+      <view class="amount-row"><text class="currency-mark">¥</text><input class="amount-input" type="digit" placeholder="0.00" value="{{item.amount}}" data-id="{{item.id}}" bindinput="onItemAmount"/><text class="currency-code">{{currency}}</text></view>
+      <picker range="{{batchModes}}" value="{{item.allocationMode === 'payer' ? 0 : item.allocationMode === 'friend' ? 1 : item.allocationMode === 'split' ? 2 : 3}}" data-id="{{item.id}}" bindchange="onItemMode"><view class="allocation-picker">{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}<text class="chevron">⌄</text></view></picker>
       <view wx:if="{{item.allocationMode === 'custom'}}" class="ratio-row"><input type="digit" value="{{item.payerPercent}}" data-id="{{item.id}}" bindinput="onItemPayerPercent"/><text>% 付款人</text><input type="digit" value="{{item.friendPercent}}" data-id="{{item.id}}" bindinput="onItemFriendPercent"/><text>% 同行人</text></view>
     </view>
-    <button class="secondary" bindtap="addItem">+ 添加商品</button>
+    <button class="add-ticket" bindtap="addItem">+ 添加商品</button>
   </view>
-  <view class="card">
-    <text class="section-title">批量分账</text><text class="hint">先打开商品条目左侧开关，再应用规则。</text>
-    <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="picker">{{batchModes[batchModeIndex]}}</view></picker>
+  <view class="batch-bar">
+    <view><text class="section-title">批量分账</text><text class="batch-note">已选择 {{selectedCount}} 项</text></view>
+    <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
     <view wx:if="{{batchModeIndex === 3}}" class="ratio-row"><input type="digit" value="{{batchPayerPercent}}" bindinput="onBatchPayerPercent"/><text>% 付款人</text><input type="digit" value="{{batchFriendPercent}}" bindinput="onBatchFriendPercent"/><text>% 同行人</text></view>
-    <button class="secondary" bindtap="applyBatchAllocation">应用到已选择商品</button>
+    <button class="batch-apply" bindtap="applyBatchAllocation">应用到已选择商品</button>
   </view>
-  <view class="card">
-    <text class="label">税额（可选）</text><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#173C48"/><text class="hint">商品金额{{taxIncluded ? "已含税" : "未含税，税额将另计"}}</text><input type="digit" placeholder="例如 10" value="{{taxAmount}}" bindinput="onTax"/>
-    <text class="label">优惠 / 退款（负数，可选）</text><input type="digit" placeholder="例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="picker">{{adjustmentLabels[adjustmentType]}}</view></picker>
+  <view class="adjustment-section">
+    <view class="list-heading"><text class="section-title">账单调整</text><text class="summary-note">可选</text></view>
+    <view class="adjustment-row"><view><text class="field-label">税额</text><text class="small-note">商品金额{{taxIncluded ? "已含税" : "未含税"}}</text></view><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#123E45"/></view>
+    <input class="quiet-input" type="digit" placeholder="填写税额，例如 10" value="{{taxAmount}}" bindinput="onTax"/>
+    <view class="adjustment-row"><text class="field-label">优惠 / 退款</text><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="inline-picker">{{adjustmentLabels[adjustmentType]}}⌄</view></picker></view>
+    <input class="quiet-input" type="digit" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
   </view>
-  <button class="primary" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">保存账单并查看分账预览</button>
+  <view class="checkout-bar">
+    <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
+    <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">查看分账</button>
+  </view>
 </view>

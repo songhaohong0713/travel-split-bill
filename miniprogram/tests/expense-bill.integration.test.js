@@ -137,3 +137,10 @@ test("item selection refreshes the visual bill summary", () => {
   assert.equal(instance.data.selectedCount, 1)
   assert.equal(instance.data.billTotal, "20.00")
 })
+
+test("expense page exposes receipt-book layout hooks", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /class="bill-summary"/)
+  assert.match(wxml, /class="batch-bar"/)
+  assert.match(wxml, /class="checkout-bar"/)
+})
