@@ -33,3 +33,37 @@ test("listTrips requests the current user's trips", async () => {
   assert.equal(calls[0].method, "GET")
   assert.equal(trips[0].name, "东京周末")
 })
+
+function loadHomePage(api, wx = {}) {
+  const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.js"), "utf8")
+  let definition
+  vm.runInNewContext(source, {
+    Page(value) { definition = value },
+    require() { return api },
+    wx: { showToast() {}, ...wx },
+    Promise,
+    encodeURIComponent,
+  })
+  return { definition }
+}
+
+function pageInstance(definition, data = {}) {
+  return { ...definition, data: { ...definition.data, ...data }, setData(value) { this.data = { ...this.data, ...value } } }
+}
+
+test("home loads trips after login and opens a selected trip", async () => {
+  const calls = []
+  const { definition } = loadHomePage({
+    login: () => Promise.resolve(),
+    listTrips: () => Promise.resolve([{ id: "trip-1", name: "东京周末", default_currency: "JPY" }]),
+    createTrip() {},
+  }, { navigateTo(value) { calls.push(value) } })
+  const page = pageInstance(definition)
+
+  await page.onLoad()
+
+  assert.equal(page.data.trips[0].name, "东京周末")
+  page.openTrip({ currentTarget: { dataset: { id: "trip-1", currency: "JPY" } } })
+  assert.match(calls[0].url, /tripId=trip-1/)
+  assert.match(calls[0].url, /currency=JPY/)
+})
