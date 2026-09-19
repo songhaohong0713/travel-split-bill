@@ -24,6 +24,7 @@ function login() {
 }
 
 function createTrip(name, defaultCurrency) { return request("/v1/trips", { method: "POST", data: { name, default_currency: defaultCurrency } }) }
+function listTrips() { return request("/v1/trips") }
 function uuid4() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (token) => {
     const value = Math.floor(Math.random() * 16)
@@ -42,4 +43,4 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, createTrip, createExpense, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
+module.exports = { request, login, createTrip, listTrips, createExpense, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
