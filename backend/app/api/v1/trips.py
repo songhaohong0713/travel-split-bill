@@ -6,10 +6,10 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.api.dependencies import CurrentUser, DbSession
-from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, User
+from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, TripMember, User
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
@@ -58,6 +58,11 @@ def _ensure_user(session: DbSession, user_id: str) -> None:
 def _cloudbase(request: Request) -> CloudBasePgClient | None:
     return getattr(request.app.state, "cloudbase_pg", None)
 
+def require_trip_member(session: DbSession, trip_id: str, user_id: str) -> Trip:
+    trip = session.scalar(select(Trip).join(TripMember).where(Trip.id == trip_id, TripMember.user_id == user_id))
+    if trip is None:
+        raise _not_found()
+    return trip
 
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
 async def create_trip(
@@ -92,6 +97,8 @@ async def create_trip(
     _ensure_user(session, user_id)
     trip = Trip(owner_id=user_id, name=body.name, default_currency=body.default_currency)
     session.add(trip)
+    session.flush()
+    session.add(TripMember(trip_id=trip.id, user_id=user_id))
     session.commit()
     return {
         "data": {
@@ -105,7 +112,7 @@ async def create_trip(
 @router.get("/trips")
 async def list_trips(
     http_request: Request, session: DbSession, user_id: CurrentUser
-) -> dict[str, list[dict[str, str]]]:
+) -> dict[str, list[dict[str, object]]]:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
@@ -134,20 +141,17 @@ async def list_trips(
             ]
         }
 
-    trips = session.scalars(
-        select(Trip).where(Trip.owner_id == user_id).order_by(Trip.created_at, Trip.id)
-    ).all()
-    return {
-        "data": [
-            {
-                "id": trip.id,
-                "name": trip.name,
-                "default_currency": trip.default_currency,
-            }
-            for trip in trips
-        ]
-    }
+    trips = session.scalars(select(Trip).join(TripMember).where(TripMember.user_id == user_id).order_by(Trip.created_at, Trip.id)).all()
+    return {"data": [{"id": trip.id, "name": trip.name, "default_currency": trip.default_currency, "member_count": session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip.id))} for trip in trips]}
 
+
+@router.get("/trips/{trip_id}/members")
+async def list_trip_members(trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser) -> dict[str, list[dict[str, object]]]:
+    if _cloudbase(http_request) is not None:
+        raise _cloudbase_error(ValueError("trip membership requires CloudBase migration"))
+    trip = require_trip_member(session, trip_id, user_id)
+    members = session.scalars(select(TripMember).where(TripMember.trip_id == trip.id).order_by(TripMember.joined_at)).all()
+    return {"data": [{"id": member.user_id, "is_owner": member.user_id == trip.owner_id} for member in members]}
 
 @router.get("/trips/{trip_id}/expenses")
 async def list_expenses(
@@ -183,12 +187,10 @@ async def list_expenses(
             ]
         }
 
-    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
-    if trip is None:
-        raise _not_found()
+    require_trip_member(session, trip_id, user_id)
     expenses = session.scalars(
         select(ExpenseRecord)
-        .where(ExpenseRecord.trip_id == trip_id, ExpenseRecord.owner_id == user_id)
+        .where(ExpenseRecord.trip_id == trip_id)
         .order_by(ExpenseRecord.created_at)
     ).all()
     return {
@@ -257,9 +259,7 @@ async def create_expense(
         persisted = result.get("response", response)
         return JSONResponse(status_code=status.HTTP_201_CREATED, content=persisted)
 
-    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
-    if trip is None:
-        raise _not_found()
+    require_trip_member(session, trip_id, user_id)
     existing = session.scalar(
         select(IdempotencyRecord).where(
             IdempotencyRecord.owner_id == user_id,
@@ -335,14 +335,11 @@ async def update_expense(
             }
         }
 
-    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
-    if trip is None:
-        raise _not_found()
+    require_trip_member(session, trip_id, user_id)
     expense = session.scalar(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
             ExpenseRecord.trip_id == trip_id,
-            ExpenseRecord.owner_id == user_id,
         )
     )
     if expense is None:
@@ -351,7 +348,6 @@ async def update_expense(
         update(ExpenseRecord)
         .where(
             ExpenseRecord.id == expense_id,
-            ExpenseRecord.owner_id == user_id,
             ExpenseRecord.trip_id == trip_id,
             ExpenseRecord.revision == body.revision,
         )
@@ -372,7 +368,6 @@ async def update_expense(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
             ExpenseRecord.trip_id == trip_id,
-            ExpenseRecord.owner_id == user_id,
         )
     )
     if updated is None:  # pragma: no cover
