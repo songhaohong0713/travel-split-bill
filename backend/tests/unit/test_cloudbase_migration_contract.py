@@ -12,6 +12,7 @@ REQUIRED_RPCS = {
     "tsb_mark_receipt_uploaded",
     "tsb_create_receipt_job",
     "tsb_claim_receipt_job",
+
 }
 
 
@@ -24,3 +25,11 @@ def test_migration_defines_all_mutation_rpcs():
     assert "REVOKE ALL ON FUNCTION" in sql
     assert "GRANT EXECUTE ON FUNCTION" in sql
     assert "service_role" in sql
+
+def test_collaboration_increment_defines_invite_rpcs():
+    sql = Path("infra/cloudbase/20260919_trip_collaboration.sql").read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS trip_members" in sql
+    assert "CREATE TABLE IF NOT EXISTS trip_invites" in sql
+    assert "FUNCTION public.tsb_create_trip_invite" in sql
+    assert "FUNCTION public.tsb_accept_trip_invite" in sql
+    assert "INSERT INTO trip_members" in sql

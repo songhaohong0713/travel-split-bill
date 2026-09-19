@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 from app.api.dependencies import CurrentUser, DbSession
 from app.api.v1.trips import _cloudbase, _cloudbase_error, _ensure_user, _not_found, require_trip_member
 from app.db.models import Trip, TripInvite, TripMember
+from app.providers.cloudbase_pg import CloudBasePgConfigurationError, CloudBasePgUnavailable
 
 router = APIRouter(prefix="/v1", tags=["trip-invites"])
 
