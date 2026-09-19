@@ -1,1 +1,32 @@
-<view class="page"><view class="masthead"><text class="eyebrow">TRAVEL LEDGER</text><text class="title">我的旅行</text><text class="subtitle">每一笔消费，都有清楚的去向。</text></view><view class="card"><text class="label">旅行名称</text><input placeholder="例如：东京周末" value="{{name}}" bindinput="onName"/><view class="currency"><text>结算币种</text><picker range="{{currencies}}" bindchange="onCurrency"><text>{{currency}}</text></picker></view></view><button class="primary" bindtap="createTrip">创建并录入消费</button></view>
+<view class="page trips-page">
+  <view class="home-hero">
+    <text class="hero-mark">旅账</text>
+    <text class="title">我的旅行</text>
+    <text class="subtitle">下一笔，记到哪段旅程？</text>
+  </view>
+
+  <view wx:if="{{loadError}}" class="load-error"><text>{{loadError}}</text></view>
+  <view wx:if="{{loadingTrips}}" class="loading-trips"><text>正在整理旅行账本…</text></view>
+  <view wx:elif="{{trips.length}}" class="trip-list">
+    <view class="section-heading"><text class="section-title">继续记账</text><text class="section-note">最近创建的旅行</text></view>
+    <view wx:for="{{trips}}" wx:key="id" class="travel-stub" data-id="{{item.id}}" data-currency="{{item.default_currency}}" bindtap="openTrip">
+      <view class="stub-main"><text class="stub-name">{{item.name}}</text><text class="stub-action">继续录入</text></view>
+      <view class="stub-footer"><text>共同消费账本</text><text class="stub-currency">{{item.default_currency}}</text></view>
+    </view>
+  </view>
+  <view wx:else class="empty-trips">
+    <text class="empty-title">还没有旅行账单</text>
+    <text class="empty-copy">先创建一段旅行，再记录每一笔共同消费。</text>
+    <button class="empty-action" bindtap="toggleCreateForm">创建第一段旅行</button>
+  </view>
+
+  <view class="create-panel">
+    <view wx:if="{{trips.length}}" class="create-trigger" bindtap="toggleCreateForm"><text>新建一段旅行</text><text>{{showCreateForm ? "收起" : "+"}}</text></view>
+    <view wx:if="{{showCreateForm || !trips.length}}" class="create-form">
+      <text class="field-label">旅行名称</text>
+      <input placeholder="例如：东京周末" value="{{name}}" bindinput="onName"/>
+      <view class="currency-row"><text class="field-label">结算币种</text><picker range="{{currencies}}" bindchange="onCurrency"><view class="currency-picker">{{currency}}<text>⌄</text></view></picker></view>
+      <button class="create-button" bindtap="createTrip" loading="{{creating}}" disabled="{{creating}}">创建并录入消费</button>
+    </view>
+  </view>
+</view>

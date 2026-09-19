@@ -67,3 +67,10 @@ test("home loads trips after login and opens a selected trip", async () => {
   assert.match(calls[0].url, /tripId=trip-1/)
   assert.match(calls[0].url, /currency=JPY/)
 })
+
+test("home exposes travel-stub layout hooks", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.wxml"), "utf8")
+  assert.match(wxml, /class="travel-stub"/)
+  assert.match(wxml, /class="empty-trips"/)
+  assert.match(wxml, /class="create-panel"/)
+})
