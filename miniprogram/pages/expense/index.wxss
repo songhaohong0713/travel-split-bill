@@ -1,4 +1,4 @@
-.expense-page { min-height: 100vh; padding: 56rpx 32rpx 220rpx; box-sizing: border-box; background: #F4EFE5; color: #123E45; }
+.expense-page { min-height: 100vh; padding: 56rpx 32rpx 72rpx; box-sizing: border-box; background: #F4EFE5; color: #123E45; }
 .masthead { margin: 8rpx 8rpx 42rpx; }
 .kicker { display: block; color: #C86D45; font-size: 20rpx; font-weight: 700; letter-spacing: 3rpx; }
 .title { display: block; margin-top: 14rpx; font-size: 62rpx; line-height: 1.15; font-weight: 700; letter-spacing: -2rpx; }
@@ -42,7 +42,7 @@
 .adjustment-row { margin-top: 22rpx; }
 .inline-picker { margin: 0; color: #66767A; font-size: 23rpx; }
 .quiet-input { display: block; width: 100%; box-sizing: border-box; font-size: 27rpx; }
-.checkout-bar { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: space-between; padding: 22rpx 32rpx calc(22rpx + env(safe-area-inset-bottom)); background: #FFFDF8; border-top: 2rpx solid #D9D2C6; box-shadow: 0 -8rpx 24rpx rgba(18, 62, 69, 0.08); }
+.checkout-bar { display: flex; align-items: center; justify-content: space-between; margin: 36rpx -32rpx -72rpx; padding: 22rpx 32rpx calc(22rpx + env(safe-area-inset-bottom)); background: #FFFDF8; border-top: 2rpx solid #D9D2C6; box-shadow: 0 -8rpx 24rpx rgba(18, 62, 69, 0.08); }
 .checkout-label { display: block; color: #66767A; font-size: 22rpx; }
 .checkout-total { display: block; margin-top: 4rpx; color: #C86D45; font-size: 42rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
 .checkout-button { min-width: 248rpx; margin: 0; color: #FFFDF8; background: #123E45; border-radius: 16rpx; font-weight: 600; }
