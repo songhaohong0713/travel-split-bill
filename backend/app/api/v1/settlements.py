@@ -125,7 +125,7 @@ async def preview_settlement(
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
-            rows = await cloudbase.request("GET", "/trips", params={"id": f"eq.{trip_id}", "owner_id": f"eq.{user_id}", "select": "id", "limit": "1"})
+            rows = await cloudbase.request("GET", "/trip_members", params={"trip_id": f"eq.{trip_id}", "user_id": f"eq.{user_id}", "select": "id", "limit": "1"})
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(rows, list) or not rows:

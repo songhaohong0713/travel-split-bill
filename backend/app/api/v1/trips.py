@@ -116,15 +116,7 @@ async def list_trips(
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
-            rows = await cloudbase.request(
-                "GET",
-                "/trips",
-                params={
-                    "owner_id": f"eq.{user_id}",
-                    "select": "id,name,default_currency",
-                    "order": "created_at.asc,id.asc",
-                },
-            )
+            rows = await cloudbase.rpc("tsb_list_member_trips", {"p_user_id": user_id})
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(rows, list):
@@ -136,6 +128,7 @@ async def list_trips(
                     "id": str(row["id"]),
                     "name": str(row["name"]),
                     "default_currency": str(row["default_currency"]),
+                    "member_count": int(row.get("member_count", 1)),
                 }
                 for row in typed_rows
             ]
@@ -165,7 +158,6 @@ async def list_expenses(
                 "/expenses",
                 params={
                     "trip_id": f"eq.{trip_id}",
-                    "owner_id": f"eq.{user_id}",
                     "select": "id,revision,occurred_at,payload_json",
                     "order": "created_at.asc",
                 },
