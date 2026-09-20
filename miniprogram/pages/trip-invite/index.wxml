@@ -1,0 +1,12 @@
+<view class="page invite-page">
+  <view class="stamp">TRAVEL TOGETHER</view>
+  <view wx:if="{{loading}}" class="state">正在读取邀请…</view>
+  <view wx:elif="{{error}}" class="state error">{{error}}</view>
+  <view wx:elif="{{invite}}" class="invite-card">
+    <text class="eyebrow">同行邀请</text>
+    <text class="title">加入「{{invite.name}}」</text>
+    <text class="copy">加入后，你们可以共同录入、修改和结算这段旅行的账单。</text>
+    <text class="expires">邀请有效至 {{invite.expires_at}}</text>
+    <button class="primary" bindtap="joinTrip" loading="{{joining}}" disabled="{{joining}}">加入这段旅行</button>
+  </view>
+</view>

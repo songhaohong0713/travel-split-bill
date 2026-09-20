@@ -13,6 +13,8 @@ class FakeCloudBasePg:
 
     async def rpc(self, name: str, payload: dict[str, object]) -> dict[str, object]:
         self.rpc_calls.append((name, payload))
+        if name == "tsb_list_member_trips":
+            return [{"id": "trip-1", "name": "Tokyo", "default_currency": "JPY", "member_count": 2}]
         return {"id": payload["p_trip_id"], "name": payload["p_name"], "default_currency": payload["p_default_currency"]}
 
     async def request(
@@ -48,8 +50,5 @@ def test_trips_use_cloudbase_rpc_for_mutation_and_table_api_for_reading(
     assert created.status_code == 201
     assert provider.rpc_calls[0][0] == "tsb_create_trip"
     assert listed.status_code == 200
-    assert provider.request_calls[0] == (
-        "GET",
-        "/trips",
-        {"owner_id": "eq.owner-1", "select": "id,name,default_currency", "order": "created_at.asc,id.asc"},
-    )
+    assert provider.rpc_calls[1] == ("tsb_list_member_trips", {"p_user_id": "owner-1"})
+

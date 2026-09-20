@@ -56,6 +56,26 @@ class Trip(Base):
     )
 
 
+class TripMember(Base):
+    __tablename__ = "trip_members"
+    __table_args__ = (UniqueConstraint("trip_id", "user_id", name="uq_trip_members_trip_user"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripInvite(Base):
+    __tablename__ = "trip_invites"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
+    creator_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime())
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+
+
 class SettlementVersion(Base):
     __tablename__ = "settlement_versions"
 

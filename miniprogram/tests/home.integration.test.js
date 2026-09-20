@@ -74,3 +74,8 @@ test("home exposes travel-stub layout hooks", () => {
   assert.match(wxml, /class="empty-trips"/)
   assert.match(wxml, /class="create-panel"/)
 })
+
+test("home shows a compact member count on each travel stub", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.wxml"), "utf8")
+  assert.match(wxml, /成员 {{item.member_count \|\| 1}}\/2/)
+})

@@ -1,0 +1,89 @@
+from collections.abc import Generator
+from uuid import uuid4
+
+import pytest
+from app.api.v1.auth import create_access_token
+from app.db.session import configure_database, create_schema, drop_schema
+from app.main import app
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client(tmp_path) -> Generator[TestClient, None, None]:
+    configure_database(f"sqlite+pysqlite:///{tmp_path / 'collaboration.db'}")
+    create_schema()
+    with TestClient(app) as test_client:
+        yield test_client
+    drop_schema()
+
+
+def auth(user_id: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {create_access_token(user_id)}"}
+
+
+def create_trip(client: TestClient, user_id: str = "owner-a") -> str:
+    response = client.post(
+        "/v1/trips",
+        headers=auth(user_id),
+        json={"name": "京都周末", "default_currency": "CNY"},
+    )
+    assert response.status_code == 201
+    return response.json()["data"]["id"]
+
+
+def expense_payload() -> dict[str, object]:
+    return {"occurred_at": "2026-09-19", "payload": {"note": "晚餐"}}
+
+
+def test_invited_user_can_join_list_and_edit_trip(client: TestClient) -> None:
+    trip_id = create_trip(client)
+    invite = client.post(f"/v1/trips/{trip_id}/invites", headers=auth("owner-a"))
+    assert invite.status_code == 201
+    token = invite.json()["data"]["token"]
+
+    accepted = client.post(f"/v1/trip-invites/{token}/accept", headers=auth("peer-b"))
+    assert accepted.status_code == 200
+
+    trips = client.get("/v1/trips", headers=auth("peer-b"))
+    assert trips.status_code == 200
+    assert trips.json()["data"] == [
+        {
+            "id": trip_id,
+            "name": "京都周末",
+            "default_currency": "CNY",
+            "member_count": 2,
+        }
+    ]
+
+    created = client.post(
+        f"/v1/trips/{trip_id}/expenses",
+        headers={**auth("peer-b"), "Idempotency-Key": str(uuid4())},
+        json=expense_payload(),
+    )
+    assert created.status_code == 201
+
+    listed = client.get(f"/v1/trips/{trip_id}/expenses", headers=auth("owner-a"))
+    assert listed.status_code == 200
+    assert len(listed.json()["data"]) == 1
+
+
+def test_trip_invite_can_only_be_accepted_once(client: TestClient) -> None:
+    trip_id = create_trip(client)
+    token = client.post(
+        f"/v1/trips/{trip_id}/invites", headers=auth("owner-a")
+    ).json()["data"]["token"]
+
+    assert client.post(f"/v1/trip-invites/{token}/accept", headers=auth("peer-b")).status_code == 200
+    repeated = client.post(f"/v1/trip-invites/{token}/accept", headers=auth("third-c"))
+    assert repeated.status_code == 410
+
+
+def test_third_user_cannot_read_or_join_full_trip(client: TestClient) -> None:
+    trip_id = create_trip(client)
+    token = client.post(
+        f"/v1/trips/{trip_id}/invites", headers=auth("owner-a")
+    ).json()["data"]["token"]
+    client.post(f"/v1/trip-invites/{token}/accept", headers=auth("peer-b"))
+
+    assert client.get(f"/v1/trips/{trip_id}/expenses", headers=auth("third-c")).status_code == 404
+    assert client.get(f"/v1/trips/{trip_id}/members", headers=auth("third-c")).status_code == 404

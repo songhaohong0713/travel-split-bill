@@ -151,3 +151,20 @@ test("settlement page exposes settlement-sheet layout hooks", () => {
   assert.match(wxml, /class="settlement-hero"/)
   assert.match(wxml, /已经结清/)
 })
+
+test("checkout bar stays in document flow so it cannot cover form controls", () => {
+  const wxss = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxss"), "utf8")
+  const checkoutRule = wxss.match(/\.checkout-bar\s*\{[^}]*\}/)[0]
+  assert.doesNotMatch(checkoutRule, /position:\s*fixed/)
+})
+
+test("expense page keeps optional tools collapsed by default", () => {
+  const { definition } = loadExpensePage({})
+  assert.equal(definition.data.showAdjustments, false)
+  assert.equal(definition.data.showBatchTools, false)
+})
+
+test("expense page exposes an invite action", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /邀请同行人/)
+})

@@ -1,13 +1,13 @@
-.expense-page { min-height: 100vh; padding: 56rpx 32rpx 220rpx; box-sizing: border-box; background: #F4EFE5; color: #123E45; }
-.masthead { margin: 8rpx 8rpx 42rpx; }
+.expense-page { min-height: 100vh; padding: 38rpx 28rpx 48rpx; box-sizing: border-box; background: #F4EFE5; color: #123E45; }
+.masthead { margin: 4rpx 6rpx 26rpx; }
 .kicker { display: block; color: #C86D45; font-size: 20rpx; font-weight: 700; letter-spacing: 3rpx; }
 .title { display: block; margin-top: 14rpx; font-size: 62rpx; line-height: 1.15; font-weight: 700; letter-spacing: -2rpx; }
-.subtitle { display: block; margin-top: 16rpx; color: #66767A; font-size: 27rpx; line-height: 1.6; }
-.bill-summary, .receipt-section, .ticket-list, .adjustment-section { margin-bottom: 26rpx; padding: 28rpx; background: #FFFDF8; border: 2rpx solid #E2DBCF; border-radius: 24rpx; box-sizing: border-box; }
+.subtitle { display: block; margin-top: 10rpx; color: #66767A; font-size: 27rpx; line-height: 1.6; }
+.bill-summary, .receipt-section, .ticket-list, .adjustment-section { margin-bottom: 16rpx; padding: 20rpx; background: #FFFDF8; border: 2rpx solid #E2DBCF; border-radius: 24rpx; box-sizing: border-box; }
 .summary-head, .list-heading, .ticket-topline, .adjustment-row { display: flex; align-items: center; justify-content: space-between; }
 .section-title { display: block; font-size: 32rpx; font-weight: 700; }
 .summary-note, .batch-note, .receipt-status, .small-note { color: #66767A; font-size: 23rpx; }
-.people-grid { display: flex; gap: 18rpx; margin-top: 24rpx; }
+.people-grid { display: flex; gap: 14rpx; margin-top: 14rpx; }
 .person-field { flex: 1; min-width: 0; }
 .field-label { display: block; color: #66767A; font-size: 23rpx; }
 .person-field input, .quiet-input { margin-top: 12rpx; padding: 16rpx 0; border-bottom: 2rpx solid #D9D2C6; font-size: 29rpx; }
@@ -20,21 +20,21 @@
 .text-button { margin: 16rpx 0 0; padding: 0; color: #C86D45; background: transparent; font-size: 25rpx; text-align: left; }
 .text-button::after, .add-ticket::after, .remove-button::after { border: 0; }
 .ticket-list { padding-bottom: 18rpx; }
-.ticket-card { margin-top: 20rpx; padding: 22rpx; background: #FFFDF8; border: 2rpx dashed #D9D2C6; border-radius: 18rpx; }
+.ticket-card { margin-top: 12rpx; padding: 16rpx; background: #FFFDF8; border: 2rpx dashed #D9D2C6; border-radius: 18rpx; }
 .ticket-card.is-selected { background: #DCEBE3; border-style: solid; border-color: #5D8170; }
 .select-mark { display: flex; align-items: center; gap: 10rpx; color: #66767A; font-size: 23rpx; }
 .remove-button { margin: 0; padding: 4rpx 8rpx; color: #8A6A5E; background: transparent; font-size: 22rpx; }
-.item-name { display: block; margin-top: 22rpx; font-size: 31rpx; font-weight: 600; }
-.amount-row { display: flex; align-items: baseline; margin-top: 16rpx; padding-bottom: 16rpx; border-bottom: 2rpx solid #E5DED4; }
+.item-name { display: block; margin-top: 12rpx; font-size: 29rpx; font-weight: 600; }
+.amount-row { display: flex; align-items: baseline; margin-top: 8rpx; padding-bottom: 8rpx; border-bottom: 2rpx solid #E5DED4; }
 .currency-mark { color: #C86D45; font-size: 29rpx; font-weight: 700; }
-.amount-input { flex: 1; margin-left: 8rpx; color: #123E45; font-size: 38rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
+.amount-input { flex: 1; margin-left: 8rpx; color: #123E45; font-size: 34rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
 .currency-code { color: #66767A; font-size: 22rpx; }
-.allocation-picker, .batch-picker, .inline-picker { display: flex; align-items: center; justify-content: space-between; margin-top: 18rpx; color: #123E45; font-size: 25rpx; }
+.allocation-picker, .batch-picker, .inline-picker { display: flex; align-items: center; justify-content: space-between; margin-top: 10rpx; color: #123E45; font-size: 25rpx; }
 .chevron { margin-left: auto; color: #66767A; }
-.ratio-row { display: flex; align-items: center; gap: 10rpx; margin-top: 16rpx; color: #66767A; font-size: 23rpx; }
+.ratio-row { display: flex; align-items: center; gap: 10rpx; margin-top: 10rpx; color: #66767A; font-size: 23rpx; }
 .ratio-row input { width: 78rpx; padding: 10rpx 8rpx; background: #FFFDF8; border: 2rpx solid #D9D2C6; border-radius: 10rpx; text-align: center; }
-.add-ticket { margin: 24rpx 0 0; color: #123E45; background: #FFFDF8; border: 2rpx dashed #78958A; border-radius: 16rpx; font-size: 27rpx; }
-.batch-bar { margin-bottom: 26rpx; padding: 28rpx; background: #123E45; color: #FFFDF8; border-radius: 24rpx; }
+.add-ticket { margin: 14rpx 0 0; color: #123E45; background: #FFFDF8; border: 2rpx dashed #78958A; border-radius: 16rpx; font-size: 27rpx; }
+.batch-bar { margin-bottom: 16rpx; padding: 20rpx; background: #123E45; color: #FFFDF8; border-radius: 24rpx; }
 .batch-bar .batch-note { display: block; margin-top: 8rpx; color: #BFD5CB; }
 .batch-picker { padding: 20rpx 0; color: #FFFDF8; border-bottom: 2rpx solid #42656A; }
 .batch-bar .ratio-row { color: #DCEBE3; }
@@ -42,7 +42,7 @@
 .adjustment-row { margin-top: 22rpx; }
 .inline-picker { margin: 0; color: #66767A; font-size: 23rpx; }
 .quiet-input { display: block; width: 100%; box-sizing: border-box; font-size: 27rpx; }
-.checkout-bar { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: space-between; padding: 22rpx 32rpx calc(22rpx + env(safe-area-inset-bottom)); background: #FFFDF8; border-top: 2rpx solid #D9D2C6; box-shadow: 0 -8rpx 24rpx rgba(18, 62, 69, 0.08); }
+.checkout-bar { display: flex; align-items: center; justify-content: space-between; margin: 36rpx -32rpx -72rpx; padding: 22rpx 32rpx calc(22rpx + env(safe-area-inset-bottom)); background: #FFFDF8; border-top: 2rpx solid #D9D2C6; box-shadow: 0 -8rpx 24rpx rgba(18, 62, 69, 0.08); }
 .checkout-label { display: block; color: #66767A; font-size: 22rpx; }
 .checkout-total { display: block; margin-top: 4rpx; color: #C86D45; font-size: 42rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
-.checkout-button { min-width: 248rpx; margin: 0; color: #FFFDF8; background: #123E45; border-radius: 16rpx; font-weight: 600; }
+.checkout-button { min-width: 248rpx; margin: 0; color: #FFFDF8; background: #123E45; border-radius: 16rpx; font-weight: 600; }.invite-button { margin: 0; padding: 4rpx 12rpx; color: #123E45; background: #E8F0EA; border: 1rpx solid #9DB9AA; border-radius: 12rpx; font-size: 22rpx; }

@@ -5,7 +5,7 @@
     <text class="subtitle">把这张小票，记进共同的旅行账本。</text>
   </view>
   <view class="bill-summary">
-    <view class="summary-head"><text class="section-title">同行信息</text><text class="summary-note">2 人分账</text></view>
+    <view class="summary-head"><text class="section-title">同行信息</text><button class="invite-button" size="mini" bindtap="inviteCompanion" loading="{{inviting}}">邀请同行人</button></view>
     <view class="people-grid">
       <view class="person-field"><text class="field-label">付款人</text><input placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
       <view class="person-field"><text class="field-label">同行人</text><input placeholder="例如：小林" value="{{friend}}" bindinput="onFriend"/></view>
@@ -35,19 +35,19 @@
     </view>
     <button class="add-ticket" bindtap="addItem">+ 添加商品</button>
   </view>
-  <view class="batch-bar">
+  <view wx:if="{{showBatchTools}}" class="batch-bar">
     <view><text class="section-title">批量分账</text><text class="batch-note">已选择 {{selectedCount}} 项</text></view>
     <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
     <view wx:if="{{batchModeIndex === 3}}" class="ratio-row"><input type="digit" value="{{batchPayerPercent}}" bindinput="onBatchPayerPercent"/><text>% 付款人</text><input type="digit" value="{{batchFriendPercent}}" bindinput="onBatchFriendPercent"/><text>% 同行人</text></view>
     <button class="batch-apply" bindtap="applyBatchAllocation">应用到已选择商品</button>
   </view>
   <view class="adjustment-section">
-    <view class="list-heading"><text class="section-title">账单调整</text><text class="summary-note">可选</text></view>
+    <view class="list-heading" bindtap="toggleAdjustments"><text class="section-title">账单调整</text><text class="summary-note">{{showAdjustments ? "收起" : "可选"}}</text></view><view wx:if="{{showAdjustments}}">
     <view class="adjustment-row"><view><text class="field-label">税额</text><text class="small-note">商品金额{{taxIncluded ? "已含税" : "未含税"}}</text></view><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#123E45"/></view>
     <input class="quiet-input" type="digit" placeholder="填写税额，例如 10" value="{{taxAmount}}" bindinput="onTax"/>
     <view class="adjustment-row"><text class="field-label">优惠 / 退款</text><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="inline-picker">{{adjustmentLabels[adjustmentType]}}⌄</view></picker></view>
     <input class="quiet-input" type="digit" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
-  </view>
+  </view></view>
   <view class="checkout-bar">
     <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
     <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">查看分账</button>

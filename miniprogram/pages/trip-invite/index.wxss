@@ -1,0 +1,8 @@
+.invite-page { min-height: 100vh; box-sizing: border-box; padding: 96rpx 44rpx; background: #f3f0e8; color: #173c48; }
+.stamp { color: #d46d3e; font-size: 22rpx; letter-spacing: 4rpx; font-weight: 700; }
+.invite-card { margin-top: 42rpx; padding: 46rpx 34rpx; border: 1rpx solid #c9ddd6; border-radius: 24rpx; background: #fffdf8; }
+.eyebrow, .expires, .copy { display: block; color: #667b7c; font-size: 26rpx; line-height: 1.7; }
+.title { display: block; margin: 20rpx 0; font-size: 48rpx; font-weight: 700; }
+.primary { margin-top: 44rpx; background: #173c48; color: #fff; }
+.state { margin-top: 120rpx; text-align: center; color: #667b7c; }
+.error { color: #bd563d; }
