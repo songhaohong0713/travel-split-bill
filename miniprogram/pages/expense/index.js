@@ -1,4 +1,4 @@
-const { createExpense, previewSettlement, uploadReceipt, getReceiptJob } = require("../../services/api")
+const { createExpense, previewSettlement, uploadReceipt, getReceiptJob, createTripInvite } = require("../../services/api")
 
 function newItem() {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }
@@ -85,16 +85,26 @@ function settlementUrl(tripId, preview, result) {
 }
 
 Page({
-  data: { tripId: "", currency: "CNY", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "" },
+  data: { tripId: "", currency: "CNY", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", showBatchTools: false, showAdjustments: false, inviting: false },
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
-    this.setData({ ...changes, selectedCount: selectedItemCount(next.items), billTotal: billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount) })
+    this.setData({ ...changes, selectedCount: selectedItemCount(next.items), showBatchTools: selectedItemCount(next.items) > 0, billTotal: billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount) })
   },
   onLoad(q) { this.syncBill({ tripId: q.tripId, currency: q.currency }) },
   chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); this.startOcr(tempFilePath) } }) }) },
   startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) },
   pollOcr(jobId) { getReceiptJob(jobId).then((job) => { const labels = { queued: "排队识别中", processing: "正在识别", needs_review: "待核对", failed: "识别失败，可手动录入" }; const candidates = job.status === "needs_review" ? (job.candidates || []) : []; this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: candidates }); if (job.status === "needs_review") this.openOcrReview(candidates, job.error_code || ""); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }).catch(() => this.setData({ ocrStatus: "识别状态查询失败，可手动录入" })) },
   openOcrReview(candidates = this.data.ocrCandidates, errorCode = "") { wx.navigateTo({ url: `/pages/ocr-review/index?status=needs_review&errorCode=${encodeURIComponent(errorCode)}&candidates=${encodeURIComponent(JSON.stringify(candidates))}`, events: { ocrCandidateConfirmed: ({ sourceText, translatedText, amount }) => this.setData({ sourceText, translatedText, amount }) } }) },
+  toggleAdjustments() { this.setData({ showAdjustments: !this.data.showAdjustments }) },
+  inviteCompanion() {
+    if (this.data.inviting || !this.data.tripId) return
+    this.setData({ inviting: true })
+    createTripInvite(this.data.tripId)
+      .then((invite) => new Promise((resolve, reject) => wx.setClipboardData({ data: `pages/trip-invite/index?token=${invite.token}`, success: resolve, fail: reject })))
+      .then(() => wx.showModal({ title: "邀请已复制", content: "发送给同行人后，对方打开即可加入并共同编辑。", showCancel: false }))
+      .catch((error) => wx.showToast({ title: error.message || "创建邀请失败", icon: "none" }))
+      .finally(() => this.setData({ inviting: false }))
+  },
   onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.setData({ adjustmentType: Number(e.detail.value) }) },
   updateItem(id, field, value) { this.syncBill({ items: this.data.items.map((item) => item.id === id ? { ...item, [field]: value } : item) }) },
   onItemName(e) { this.updateItem(e.currentTarget.dataset.id, "name", e.detail.value) }, onItemAmount(e) { this.updateItem(e.currentTarget.dataset.id, "amount", e.detail.value) },
