@@ -15,6 +15,10 @@ from app.providers.cloudbase_pg import (
     CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
+from app.providers.cloudbase_receipt_ai import (
+    CloudBaseReceiptAi,
+    CloudBaseReceiptAiError,
+)
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 
 
@@ -22,6 +26,7 @@ from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 async def lifespan(_: FastAPI):
     configure_wechat_auth()
     configure_cloudbase_pg()
+    configure_receipt_ai()
     yield
 
 
@@ -45,6 +50,15 @@ def configure_wechat_auth() -> None:
     except WechatAuthError:
         # Local development and health endpoints remain available without WeChat credentials.
         return
+
+
+def configure_receipt_ai() -> None:
+    if getattr(app.state, "receipt_ai", None) is not None:
+        return
+    try:
+        app.state.receipt_ai = CloudBaseReceiptAi.from_environment()
+    except CloudBaseReceiptAiError:
+        app.state.receipt_ai = None
 
 app.include_router(auth_router)
 app.include_router(trips_router)

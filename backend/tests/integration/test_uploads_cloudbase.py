@@ -18,22 +18,39 @@ class FakeCloudBasePg:
             return {"id": payload["p_image_id"], "status": "uploaded"}
         return {"id": payload["p_job_id"], "status": "queued"}
 
+    async def request(self, method: str, path: str, **kwargs: object) -> list[object]:
+        self.calls.append((f"{method} {path}", kwargs))
+        return []
+
+
+class FakeReceiptAi:
+    async def recognize(self, _: bytes) -> list[dict[str, str]]:
+        return [{"source_text": "tea", "translated_text": "茶", "amount": "3.50", "currency": "USD"}]
+
 
 @pytest.fixture
 def client() -> Generator[tuple[TestClient, FakeCloudBasePg], None, None]:
     provider = FakeCloudBasePg()
     app.state.cloudbase_pg = provider
+    app.state.receipt_ai = FakeReceiptAi()
     with TestClient(app) as test_client:
         yield test_client, provider
     delattr(app.state, "cloudbase_pg")
+    delattr(app.state, "receipt_ai")
 
 
-def test_upload_lifecycle_uses_cloudbase_rpcs(client: tuple[TestClient, FakeCloudBasePg]) -> None:
+def test_receipt_job_uses_cloudbase_rpcs_and_persists_candidates(client: tuple[TestClient, FakeCloudBasePg]) -> None:
     test_client, provider = client
     headers = {"Authorization": f"Bearer {create_access_token('owner-1')}"}
-    upload = test_client.post("/v1/uploads", headers=headers, json={"trip_id": "trip-1", "mime_type": "image/jpeg", "byte_size": 1, "sha256": "a" * 64})
-    assert upload.status_code == 201
-    image_id = upload.json()["data"]["image_id"]
-    assert test_client.post(f"/v1/uploads/{image_id}/complete", headers=headers).status_code == 200
-    assert test_client.post("/v1/receipt-jobs", headers=headers, json={"image_id": image_id}).status_code == 202
-    assert [name for name, _ in provider.calls] == ["tsb_create_receipt_image", "tsb_mark_receipt_uploaded", "tsb_create_receipt_job"]
+    response = test_client.post(
+        "/v1/receipt-jobs",
+        headers=headers,
+        data={"trip_id": "trip-1"},
+        files={"file": ("receipt.jpg", b"jpeg", "image/jpeg")},
+    )
+    assert response.status_code == 202
+    assert response.json()["data"]["candidates"][0]["translated_text"] == "茶"
+    assert [name for name, _ in provider.calls[:3]] == ["tsb_create_receipt_image", "tsb_mark_receipt_uploaded", "tsb_create_receipt_job"]
+    method, kwargs = provider.calls[3]
+    assert method == "PATCH /receipt_jobs"
+    assert kwargs["payload"]["status"] == "needs_review"

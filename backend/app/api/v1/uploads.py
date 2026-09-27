@@ -1,8 +1,7 @@
-from typing import Any, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser, DbSession
@@ -13,15 +12,9 @@ from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
     CloudBasePgUnavailable,
 )
+from app.providers.cloudbase_receipt_ai import CloudBaseReceiptAiError
 
 router = APIRouter(prefix="/v1", tags=["uploads"])
-
-
-class UploadRequest(BaseModel):
-    trip_id: str
-    mime_type: str
-    byte_size: int = Field(gt=0, le=10_000_000)
-    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _cloudbase(request: Request) -> CloudBasePgClient | None:
@@ -32,77 +25,72 @@ def _cloudbase_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=503, detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"})
 
 
-@router.post("/uploads", status_code=status.HTTP_201_CREATED)
-async def create_upload(
-    body: UploadRequest, http_request: Request, session: DbSession, user_id: CurrentUser
-) -> dict[str, dict[str, str]]:
-    if body.mime_type != "image/jpeg":
-        raise HTTPException(status_code=400, detail={"code": "INVALID_RECEIPT_IMAGE", "message": "仅支持 JPEG 小票"})
-    image_id = str(uuid4())
-    key = f"receipts/{user_id}/{body.trip_id}/{image_id}.jpg"
-    cloudbase = _cloudbase(http_request)
-    if cloudbase is not None:
-        try:
-            result = await cloudbase.rpc("tsb_create_receipt_image", {"p_image_id": image_id, "p_owner_id": user_id, "p_trip_id": body.trip_id, "p_object_key": key})
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
-            raise _cloudbase_error(exc) from exc
-        if not isinstance(result, dict) or result.get("not_found"):
-            raise _not_found()
-        return {"data": {"image_id": image_id, "object_key": key, "upload_url": f"/storage-upload/{key}"}}
-    trip = session.scalar(select(Trip).where(Trip.id == body.trip_id, Trip.owner_id == user_id))
-    if trip is None:
-        raise _not_found()
-    session.add(ReceiptImage(id=image_id, owner_id=user_id, trip_id=body.trip_id, object_key=key))
-    session.commit()
-    return {"data": {"image_id": image_id, "object_key": key, "upload_url": f"/storage-upload/{key}"}}
-
-
-@router.post("/uploads/{image_id}/complete")
-async def complete_upload(
-    image_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
-) -> dict[str, dict[str, str]]:
-    cloudbase = _cloudbase(http_request)
-    if cloudbase is not None:
-        try:
-            result = await cloudbase.rpc("tsb_mark_receipt_uploaded", {"p_image_id": image_id, "p_owner_id": user_id})
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
-            raise _cloudbase_error(exc) from exc
-        if not isinstance(result, dict) or result.get("not_found"):
-            raise _not_found()
-        return {"data": {"image_id": image_id, "status": str(result["status"])}}
-    image = session.get(ReceiptImage, image_id)
-    if image is None or image.owner_id != user_id:
-        raise _not_found()
-    image.status = "uploaded"
-    session.commit()
-    return {"data": {"image_id": image.id, "status": image.status}}
-
-
-class ReceiptJobRequest(BaseModel):
-    image_id: str
-
-
 @router.post("/receipt-jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_receipt_job(
-    body: ReceiptJobRequest, http_request: Request, session: DbSession, user_id: CurrentUser
-) -> dict[str, dict[str, str]]:
+    trip_id: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+    http_request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+) -> dict[str, object]:
+    if file.content_type != "image/jpeg":
+        raise HTTPException(status_code=400, detail={"code": "INVALID_RECEIPT_IMAGE", "message": "仅支持 JPEG 小票"})
+    image_bytes = await file.read()
+    if not image_bytes or len(image_bytes) > 5_000_000:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_RECEIPT_IMAGE", "message": "小票图片必须小于 5 MB"})
+    image_id, job_id = str(uuid4()), str(uuid4())
+    key = f"receipts/{user_id}/{trip_id}/{image_id}.jpg"
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
-        job_id = str(uuid4())
         try:
-            result = await cloudbase.rpc("tsb_create_receipt_job", {"p_job_id": job_id, "p_image_id": body.image_id, "p_owner_id": user_id})
+            image_result = await cloudbase.rpc("tsb_create_receipt_image", {"p_image_id": image_id, "p_owner_id": user_id, "p_trip_id": trip_id, "p_object_key": key})
+            if not isinstance(image_result, dict) or image_result.get("not_found"):
+                raise _not_found()
+            await cloudbase.rpc("tsb_mark_receipt_uploaded", {"p_image_id": image_id, "p_owner_id": user_id})
+            result = await cloudbase.rpc("tsb_create_receipt_job", {"p_job_id": job_id, "p_image_id": image_id, "p_owner_id": user_id})
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
-        return {"data": {"id": str(result["id"]), "status": str(result["status"])}}
-    image = session.get(ReceiptImage, body.image_id)
-    if image is None or image.owner_id != user_id or image.status != "uploaded":
-        raise _not_found()
-    job = ReceiptJob(image_id=image.id)
-    session.add(job)
-    session.commit()
-    return {"data": {"id": job.id, "status": job.status}}
+    else:
+        trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
+        if trip is None:
+            raise _not_found()
+        session.add(ReceiptImage(id=image_id, owner_id=user_id, trip_id=trip_id, object_key=key, status="uploaded"))
+        session.add(ReceiptJob(id=job_id, image_id=image_id))
+        session.commit()
+
+    provider = getattr(http_request.app.state, "receipt_ai", None)
+    status_value, attempts, candidates, error_code = await _recognize(provider, image_bytes)
+    if cloudbase is not None:
+        try:
+            await cloudbase.request(
+                "PATCH",
+                "/receipt_jobs",
+                params={"id": f"eq.{job_id}"},
+                payload={"status": status_value, "attempts": attempts, "candidates_json": candidates, "error_code": error_code},
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+    else:
+        job = session.get(ReceiptJob, job_id)
+        if job is None:
+            raise _not_found()
+        job.status, job.attempts, job.candidates_json, job.error_code = status_value, attempts, candidates, error_code
+        session.commit()
+    return {"data": {"id": job_id, "status": status_value, "candidates": candidates}}
+
+
+async def _recognize(provider: object, image_bytes: bytes) -> tuple[str, int, list[dict[str, str]], str | None]:
+    if provider is None:
+        return "failed", 0, [], "OCR_FAILED"
+    for attempts in range(1, 4):
+        try:
+            candidates = await provider.recognize(image_bytes)
+            return "needs_review", attempts, candidates, None
+        except CloudBaseReceiptAiError:
+            continue
+    return "failed", 3, [], "OCR_FAILED"
 
 
 @router.get("/receipt-jobs/{job_id}")
