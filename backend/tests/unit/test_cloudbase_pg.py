@@ -44,6 +44,20 @@ def test_client_sends_bearer_key_and_maps_503_to_unavailable():
 
     assert captured["authorization"] == "Bearer server-key"
 
+
+def test_client_accepts_an_empty_successful_patch_response():
+    client = CloudBasePgClient(
+        "travel-split-bill",
+        "server-key",
+        httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(204, request=request)
+            )
+        ),
+    )
+
+    assert asyncio.run(client.request("PATCH", "/receipt_jobs", payload={"status": "needs_review"})) is None
+
 def test_from_environment_uses_cloud_hosting_injected_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ):

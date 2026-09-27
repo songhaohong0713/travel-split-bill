@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 
 import pytest
@@ -40,6 +41,22 @@ def test_receipt_job_processes_jpeg_without_creating_expense(client: TestClient)
         {'source_text': 'お茶', 'translated_text': '茶', 'amount': '120', 'currency': 'JPY'}
     ]
     assert client.get(f"/v1/trips/{trip['id']}/expenses", headers=headers).json()['data'] == []
+
+
+def test_receipt_job_logs_safe_recognition_metadata(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    headers = {"Authorization": f"Bearer {create_access_token('owner')}"}
+    trip = client.post("/v1/trips", headers=headers, json={"name": "东京", "default_currency": "JPY"}).json()["data"]
+
+    client.post(
+        "/v1/receipt-jobs",
+        headers=headers,
+        data={"trip_id": trip["id"]},
+        files={"file": ("receipt.jpg", b"jpeg", "image/jpeg")},
+    )
+
+    assert "receipt_job recognition_finished status=needs_review attempts=1 candidates=1" in caplog.text
+    assert "お茶" not in caplog.text
 
 
 def test_receipt_job_rejects_non_jpeg(client: TestClient) -> None:

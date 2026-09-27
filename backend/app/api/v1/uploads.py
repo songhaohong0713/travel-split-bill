@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from app.providers.cloudbase_pg import (
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
 
 router = APIRouter(prefix="/v1", tags=["uploads"])
+logger = logging.getLogger(__name__)
 
 
 def _cloudbase(request: Request) -> CloudBasePgClient | None:
@@ -62,6 +64,12 @@ async def create_receipt_job(
 
     provider = getattr(http_request.app.state, "receipt_ai", None)
     status_value, attempts, candidates, error_code = await _recognize(provider, image_bytes)
+    logger.info(
+        "receipt_job recognition_finished status=%s attempts=%s candidates=%s",
+        status_value,
+        attempts,
+        len(candidates),
+    )
     if cloudbase is not None:
         try:
             await cloudbase.request(
@@ -88,7 +96,12 @@ async def _recognize(provider: object, image_bytes: bytes) -> tuple[str, int, li
         try:
             candidates = await provider.recognize(image_bytes)
             return "needs_review", attempts, candidates, None
-        except DeepSeekReceiptAiError:
+        except DeepSeekReceiptAiError as exc:
+            logger.warning(
+                "receipt_job recognition_attempt_failed attempt=%s error_type=%s",
+                attempts,
+                type(exc).__name__,
+            )
             continue
     return "failed", 3, [], "OCR_FAILED"
 

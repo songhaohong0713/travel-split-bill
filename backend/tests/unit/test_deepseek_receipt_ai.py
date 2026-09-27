@@ -1,27 +1,28 @@
 import asyncio
+import logging
 
 import pytest
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAi, DeepSeekReceiptAiError
 
 
 class FakeResponse:
-    status_code = 200
-
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, status_code: int = 200) -> None:
         self._content = content
+        self.status_code = status_code
 
     def json(self) -> dict[str, object]:
         return {"choices": [{"message": {"content": self._content}}]}
 
 
 class FakeClient:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, status_code: int = 200) -> None:
         self.content = content
+        self.status_code = status_code
         self.calls: list[dict[str, object]] = []
 
     async def post(self, _: str, **kwargs: object) -> FakeResponse:
         self.calls.append(kwargs)
-        return FakeResponse(self.content)
+        return FakeResponse(self.content, self.status_code)
 
 
 def test_recognize_sends_jpeg_to_deepseek_vision_endpoint() -> None:
@@ -53,3 +54,15 @@ def test_from_environment_requires_deepseek_key(monkeypatch: pytest.MonkeyPatch)
 
     with pytest.raises(DeepSeekReceiptAiError):
         DeepSeekReceiptAi.from_environment()
+
+
+def test_recognize_logs_only_safe_status_when_deepseek_rejects(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    provider = DeepSeekReceiptAi("deepseek-key", client=FakeClient("provider body", status_code=401))
+
+    with pytest.raises(DeepSeekReceiptAiError):
+        asyncio.run(provider.recognize(b"jpeg"))
+
+    assert "deepseek_receipt_request_rejected status=401" in caplog.text
+    assert "deepseek-key" not in caplog.text
+    assert "provider body" not in caplog.text

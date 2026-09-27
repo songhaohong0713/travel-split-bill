@@ -2,12 +2,15 @@
 
 import base64
 import json
+import logging
 import os
 import re
 from typing import Any
 
 import httpx
 from app.core.money import decimal_from_string
+
+logger = logging.getLogger(__name__)
 
 
 class DeepSeekReceiptAiError(RuntimeError):
@@ -67,6 +70,7 @@ class DeepSeekReceiptAi:
             if owns_client:
                 await client.aclose()
         if response.status_code != 200:
+            logger.warning("deepseek_receipt_request_rejected status=%s", response.status_code)
             raise DeepSeekReceiptAiError("DeepSeek rejected receipt extraction")
         try:
             message = response.json()["choices"][0]["message"]["content"]

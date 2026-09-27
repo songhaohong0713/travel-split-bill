@@ -74,6 +74,8 @@ class CloudBasePgClient:
             raise CloudBasePgRequestError(
                 response.status_code, "CloudBase PostgreSQL request was rejected"
             )
+        if not response.content:
+            return None
         return response.json()
 
     async def rpc(self, name: str, payload: dict[str, object]) -> object:
