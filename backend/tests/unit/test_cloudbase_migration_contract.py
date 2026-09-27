@@ -33,3 +33,9 @@ def test_collaboration_increment_defines_invite_rpcs():
     assert "FUNCTION public.tsb_create_trip_invite" in sql
     assert "FUNCTION public.tsb_accept_trip_invite" in sql
     assert "INSERT INTO trip_members" in sql
+
+
+def test_receipt_job_membership_increment_allows_trip_members():
+    sql = Path("infra/cloudbase/20260927_receipt_job_membership.sql").read_text(encoding="utf-8")
+    assert "tsb_create_receipt_image" in sql
+    assert "trip_members" in sql

@@ -1,13 +1,17 @@
 const app = getApp()
 
-function request(path, options = {}) {
+function authorizationHeader() {
   const accessToken = wx.getStorageSync("access_token")
+  return { Authorization: accessToken ? `Bearer ${accessToken}` : "" }
+}
+
+function request(path, options = {}) {
   return new Promise((resolve, reject) => {
     wx.request({
       url: `${app.globalData.apiBaseUrl}${path}`,
       method: options.method || "GET",
       data: options.data,
-      header: { Authorization: accessToken ? `Bearer ${accessToken}` : "", ...(options.header || {}) },
+      header: { ...authorizationHeader(), ...(options.header || {}) },
       success(response) {
         if (response.statusCode >= 200 && response.statusCode < 300) return resolve(response.data.data)
         reject(response.data.error || { code: "NETWORK_ERROR", message: "请求未完成" })
@@ -41,11 +45,17 @@ function updateExpense(tripId, expenseId, revision, occurredAt, payload) { retur
 function publishSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/publish`, { method: "POST", data }) }
 function createShareLink(tripId, expiresInDays) { return request(`/v1/trips/${tripId}/share-links`, { method: "POST", data: { expires_in_days: expiresInDays } }) }
 function uploadReceipt(tripId, filePath) {
-  return new Promise((resolve, reject) => wx.getFileInfo({ src: filePath, success: resolve, fail: reject }))
-    .then((info) => request("/v1/uploads", { method: "POST", data: { trip_id: tripId, mime_type: "image/jpeg", byte_size: info.size, sha256: "0".repeat(64) } }))
-    .then((upload) => new Promise((resolve, reject) => wx.uploadFile({ url: upload.upload_url.startsWith("/") ? `${app.globalData.apiBaseUrl}${upload.upload_url}` : upload.upload_url, filePath, name: "file", success: () => resolve(upload), fail: reject })))
-    .then((upload) => request(`/v1/uploads/${upload.image_id}/complete`, { method: "POST" }))
-    .then((image) => request("/v1/receipt-jobs", { method: "POST", data: { image_id: image.image_id } }))
+  return new Promise((resolve, reject) => wx.uploadFile({
+    url: `${app.globalData.apiBaseUrl}/v1/receipt-jobs`, filePath, name: "file",
+    formData: { trip_id: tripId }, header: authorizationHeader(),
+    success(response) {
+      let body
+      try { body = typeof response.data === "string" ? JSON.parse(response.data) : response.data } catch (_) { return reject({ code: "NETWORK_ERROR", message: "识别服务返回异常" }) }
+      if (response.statusCode === 202) return resolve(body.data)
+      reject(body.error || { code: "NETWORK_ERROR", message: "识别请求未完成" })
+    },
+    fail() { reject({ code: "NETWORK_ERROR", message: "网络不可用，请稍后重试" }) },
+  }))
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
