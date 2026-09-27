@@ -26,7 +26,7 @@
     <view wx:for="{{items}}" wx:key="id" class="ticket-card {{item.selected ? 'is-selected' : ''}}" data-id="{{item.id}}" bindtap="toggleItemDetail">
       <view class="compact-item-row"><switch checked="{{item.selected}}" data-id="{{item.id}}" catchchange="toggleItem" color="#123E45"/><text class="compact-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-amount">¥{{item.amount || "0.00"}}</text><text class="chevron">{{expandedItemId === item.id ? "⌃" : "⌄"}}</text></view>
       <view class="compact-item-meta"><text>{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text><text>{{currency}}</text></view>
-      <view wx:if="{{expandedItemId === item.id}}" class="item-editor">
+      <view wx:if="{{expandedItemId === item.id}}" class="item-editor" catchtap="stopItemEditorTap">
         <input class="item-name" placeholder="商品名称，例如：晚餐" value="{{item.name}}" data-id="{{item.id}}" bindinput="onItemName"/>
         <view class="amount-row"><text class="currency-mark">¥</text><input class="amount-input" type="digit" placeholder="0.00" value="{{item.amount}}" data-id="{{item.id}}" bindinput="onItemAmount"/><text class="currency-code">{{currency}}</text></view>
         <picker range="{{batchModes}}" value="{{item.allocationMode === 'payer' ? 0 : item.allocationMode === 'friend' ? 1 : item.allocationMode === 'split' ? 2 : 3}}" data-id="{{item.id}}" bindchange="onItemMode"><view class="allocation-picker">{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}<text class="chevron">⌄</text></view></picker>

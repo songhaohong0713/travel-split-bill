@@ -157,6 +157,7 @@ Page({
   onItemPayerPercent(e) { this.updateItem(e.currentTarget.dataset.id, "payerPercent", e.detail.value) }, onItemFriendPercent(e) { this.updateItem(e.currentTarget.dataset.id, "friendPercent", e.detail.value) },
   toggleItem(e) { const id = e.currentTarget.dataset.id; this.updateItem(id, "selected", !this.data.items.find((item) => item.id === id).selected) },
   toggleItemDetail(e) { const id = e.currentTarget.dataset.id; this.setData({ expandedItemId: this.data.expandedItemId === id ? "" : id }) },
+  stopItemEditorTap() {},
   addItem() { this.syncBill({ items: [...this.data.items, newItem()] }) },
   removeItem(e) { if (this.data.items.length === 1) return wx.showToast({ title: "至少保留一件商品", icon: "none" }); this.syncBill({ items: this.data.items.filter((item) => item.id !== e.currentTarget.dataset.id) }) },
   onBatchMode(e) { this.setData({ batchModeIndex: Number(e.detail.value) }) }, onBatchPayerPercent(e) { this.setData({ batchPayerPercent: e.detail.value }) }, onBatchFriendPercent(e) { this.setData({ batchFriendPercent: e.detail.value }) },

@@ -204,3 +204,8 @@ test("expense page exposes compact item disclosure", () => {
   assert.match(wxml, /toggleItemDetail/)
   assert.match(wxml, /expandedItemId/)
 })
+
+test("expanded item editor stops row toggle events from swallowing input taps", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /class="item-editor" catchtap="stopItemEditorTap"/)
+})
