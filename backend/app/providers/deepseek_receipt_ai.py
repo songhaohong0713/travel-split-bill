@@ -47,7 +47,10 @@ class DeepSeekReceiptAi:
                                 "Read this Japanese or English receipt. Translate item names into Chinese. "
                                 "Return only JSON in this exact shape: "
                                 '{"items":[{"source_text":"","translated_text":"","amount":"","currency":""}]}. '
-                                "Include only purchased item lines; amount must be positive and currency must be ISO 4217."
+                                "Include only purchased item lines. amount must be the positive line total used for "
+                                "settlement; when quantity and unit price are present, calculate their line total. "
+                                "Exclude receipt totals, tax, service fees, discounts, refunds, and payment rows. "
+                                "currency must be ISO 4217."
                             ),
                         },
                         {

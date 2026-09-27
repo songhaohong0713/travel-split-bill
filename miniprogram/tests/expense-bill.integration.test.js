@@ -173,6 +173,39 @@ test("item selection refreshes the visual bill summary", () => {
   assert.equal(instance.data.billTotal, "20.00")
 })
 
+test("receipt recognition replaces the blank starter item with every valid item", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, {
+    items: [{ id: "blank", name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+
+  instance.applyOcrCandidates([
+    { source_text: "お茶", translated_text: "茶", amount: "120" },
+    { source_text: "牛乳", translated_text: "牛奶", amount: "230" },
+  ])
+
+  assert.deepEqual(JSON.parse(JSON.stringify(instance.data.items.map(({ name, amount }) => ({ name, amount })))), [
+    { name: "茶", amount: "120" },
+    { name: "牛奶", amount: "230" },
+  ])
+  assert.match(instance.data.ocrStatus, /已自动添加 2 项/)
+})
+
+test("receipt recognition appends items without overwriting manual details", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, {
+    items: [{ id: "manual", name: "手动商品", amount: "10", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+
+  instance.applyOcrCandidates([{ source_text: "お茶", translated_text: "茶", amount: "120" }])
+
+  assert.equal(instance.data.items.length, 2)
+  assert.equal(instance.data.items[0].name, "手动商品")
+  assert.equal(instance.data.items[1].name, "茶")
+})
+
 test("expense page exposes receipt-book layout hooks", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /class="bill-summary"/)

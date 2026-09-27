@@ -15,11 +15,6 @@
     <view class="receipt-copy"><text class="section-title">票据附件</text><text class="receipt-status">{{ocrStatus}}</text></view>
     <button class="receipt-button" bindtap="chooseReceipt">拍小票 / 选照片</button>
     <image wx:if="{{receiptPath}}" class="receipt" src="{{receiptPath}}" mode="widthFix"/>
-    <view wx:if="{{ocrCandidates.length}}" class="ocr-card">
-      <text class="field-label">待核对的识别内容</text>
-      <text wx:for="{{ocrCandidates}}" wx:key="*this" class="candidate">{{item.text || item}}</text>
-      <button class="text-button" bindtap="openOcrReview">去核对</button>
-    </view>
   </view>
   <view class="ticket-list">
     <view class="list-heading"><text class="section-title">商品条目</text><text class="summary-note">共 {{items.length}} 项</text></view>

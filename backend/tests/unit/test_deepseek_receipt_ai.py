@@ -56,6 +56,20 @@ def test_from_environment_requires_deepseek_key(monkeypatch: pytest.MonkeyPatch)
         DeepSeekReceiptAi.from_environment()
 
 
+def test_receipt_prompt_requires_line_totals_and_excludes_tax() -> None:
+    client = FakeClient(
+        '{"items":[{"source_text":"Tea x2","translated_text":"茶","amount":"240","currency":"JPY"}]}'
+    )
+    provider = DeepSeekReceiptAi("deepseek-key", client=client)
+
+    asyncio.run(provider.recognize(b"jpeg"))
+
+    payload = client.calls[0]["json"]
+    prompt = payload["messages"][0]["content"][0]["text"]
+    assert "line total" in prompt
+    assert "tax" in prompt
+
+
 def test_recognize_logs_only_safe_status_when_deepseek_rejects(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
     provider = DeepSeekReceiptAi("deepseek-key", client=FakeClient("provider body", status_code=401))

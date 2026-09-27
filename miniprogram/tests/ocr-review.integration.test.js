@@ -39,21 +39,6 @@ test("OCR confirmation returns original text, translation, and amount to the exp
   }])
 })
 
-test("expense page appends a confirmed OCR candidate as an editable item", () => {
-  const api = { previewSettlement() {}, uploadReceipt() {}, getReceiptJob() { return Promise.resolve({}) } }
-  const calls = []
-  const expense = loadPage("pages/expense/index.js", { require: () => api, wx: { navigateTo(value) { calls.push(value) } } })
-  const instance = pageInstance(expense, { ocrCandidates: [{ text: "お茶 120", translated_text: "茶 120" }] })
-  instance.openOcrReview()
-  const options = calls[0]
-  assert.match(options.url, /pages\/ocr-review\/index/)
-  options.events.ocrCandidateConfirmed({ sourceText: "お茶 120", translatedText: "茶 120", amount: "120" })
-  const added = instance.data.items.at(-1)
-  assert.equal(added.name, "茶 120")
-  assert.equal(added.amount, "120")
-  assert.equal(instance.data.expandedItemId, added.id)
-})
-
 test("OCR review page is registered", () => {
   const app = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "app.json"), "utf8"))
   assert.ok(app.pages.includes("pages/ocr-review/index"))
