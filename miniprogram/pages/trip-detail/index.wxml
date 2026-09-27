@@ -1,0 +1,14 @@
+<view class="page trip-detail-page">
+  <view class="masthead"><text class="kicker">TRAVEL LEDGER</text><text class="title">{{name}}</text><text class="subtitle">每一笔消费，都清楚记下。</text></view>
+  <view wx:if="{{loading}}" class="state-card"><text>正在整理消费记录…</text></view>
+  <view wx:elif="{{loadError}}" class="state-card error"><text>{{loadError}}</text></view>
+  <view wx:elif="{{expenses.length}}" class="expense-list">
+    <view class="list-heading"><text class="section-title">消费记录</text><text class="section-note">共 {{expenses.length}} 笔</text></view>
+    <view wx:for="{{expenses}}" wx:key="id" class="expense-row" data-id="{{item.id}}" bindtap="openExpense">
+      <view class="row-main"><view><text class="expense-title">{{item.title}}</text><text class="expense-meta">{{item.occurredAt}} · {{item.payer || "待填写付款人"}} · {{item.itemCount}} 项</text></view><view class="amount"><text>¥{{item.total}}</text><text class="currency">{{item.currency}}</text></view></view>
+    </view>
+  </view>
+  <view wx:else class="empty-state"><text class="empty-title">还没有消费记录</text><text class="empty-copy">先记下第一笔消费，再逐项分账。</text></view>
+  <view class="actions"><button class="primary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">新增消费</button><button class="secondary" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">邀请同行人</button></view>
+  <button wx:if="{{inviteReady}}" class="share-button" open-type="share">发送邀请</button>
+</view>
