@@ -88,15 +88,32 @@ test("buildBillPayload keeps per-item allocations", () => {
   ])
 })
 
+test("expense helpers provide a dated title, hydrate a record, and combine a trip preview", () => {
+  const { helpers } = loadExpensePage({})
+  const recordA = {
+    id: "expense-a", revision: 2, occurred_at: "2026-09-27",
+    payload: { title: "机场晚餐", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "a", payer_id: "我", items: [], adjustments: [] }] },
+  }
+  const recordB = {
+    id: "expense-b", revision: 1, occurred_at: "2026-09-28",
+    payload: { title: "便利店", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "b", payer_id: "小王", items: [], adjustments: [] }] },
+  }
+
+  assert.equal(helpers.defaultExpenseTitle(new Date("2026-09-27T08:00:00")), "9月27日消费")
+  assert.equal(helpers.hydrateExpense(recordA).title, "机场晚餐")
+  assert.equal(helpers.buildTripPreview([recordA, recordB], "CNY").expenses.length, 2)
+})
+
 test("validateBill rejects custom shares that are not 100 percent", () => {
   const { helpers } = loadExpensePage({})
   assert.match(helpers.validateBill({ payer: "我", friend: "小王", items: [{ name: "餐费", amount: "20", allocationMode: "custom", payerPercent: "70", friendPercent: "20" }] }), /100%/)
 })
 
-test("saveAndPreview persists the bill before previewing", async () => {
+test("saveAndPreview persists then settles every expense in the trip", async () => {
   const calls = []
   const { definition } = loadExpensePage({
-    createExpense() { calls.push("save"); return Promise.resolve({ id: "expense-1" }) },
+    createExpense() { calls.push("save"); return Promise.resolve({ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }) },
+    listExpenses() { calls.push("list"); return Promise.resolve([{ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }, { id: "expense-2", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-2", payer_id: "小王", items: [], adjustments: [] }] } }]) },
     previewSettlement() { calls.push("preview"); return Promise.resolve({ transfers: [] }) },
     uploadReceipt() {}, getReceiptJob() {},
   }, { navigateTo() {} })
@@ -105,7 +122,7 @@ test("saveAndPreview persists the bill before previewing", async () => {
     items: [{ id: "a", name: "晚餐", amount: "20", allocationMode: "split", payerPercent: "50", friendPercent: "50", selected: false }],
   })
   await instance.saveAndPreview()
-  assert.deepEqual(calls, ["save", "preview"])
+  assert.deepEqual(calls, ["save", "list", "preview"])
 })
 
 test("batch allocation changes only selected items", () => {
@@ -182,7 +199,8 @@ test("expense page keeps optional tools collapsed by default", () => {
   assert.equal(definition.data.showBatchTools, false)
 })
 
-test("expense page exposes an invite action", () => {
+test("expense page exposes compact item disclosure", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
-  assert.match(wxml, /邀请同行人/)
+  assert.match(wxml, /toggleItemDetail/)
+  assert.match(wxml, /expandedItemId/)
 })
