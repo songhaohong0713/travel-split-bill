@@ -9,5 +9,6 @@
     </view>
   </view>
   <view wx:else class="empty-state"><text class="empty-title">还没有消费记录</text><text class="empty-copy">先记下第一笔消费，再逐项分账。</text></view>
-  <button class="primary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">新增消费</button>
+  <view class="actions"><button class="primary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">新增消费</button><button class="secondary" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">邀请同行人</button></view>
+  <button wx:if="{{inviteReady}}" class="share-button" open-type="share">发送邀请</button>
 </view>

@@ -58,3 +58,19 @@ test("trip detail creates a dated expense and opens its editor", async () => {
   assert.equal(created.payload.expenses[0].items.length, 0)
   assert.match(destination, /expenseId=expense-1/)
 })
+
+test("trip detail prepares a native share path after creating an invite", async () => {
+  const definition = loadTripDetail({
+    createTripInvite() { return Promise.resolve({ token: "invite-token" }) },
+  })
+  const page = pageInstance(definition, { tripId: "trip-1" })
+
+  await page.prepareInvite()
+
+  assert.equal(page.data.inviteReady, true)
+  assert.equal(page.data.invitePath, "/pages/trip-invite/index?token=invite-token")
+  assert.deepEqual(JSON.parse(JSON.stringify(page.onShareAppMessage())), {
+    title: "邀请你一起记旅行账",
+    path: "/pages/trip-invite/index?token=invite-token",
+  })
+})

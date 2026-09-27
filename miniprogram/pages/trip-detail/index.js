@@ -1,4 +1,4 @@
-const { createExpense, listExpenses } = require("../../services/api")
+const { createExpense, createTripInvite, listExpenses } = require("../../services/api")
 
 function defaultExpenseTitle(now = new Date()) {
   return `${now.getMonth() + 1}月${now.getDate()}日消费`
@@ -16,7 +16,7 @@ function emptyPayload(title, currency) {
 }
 
 Page({
-  data: { tripId: "", currency: "CNY", name: "", expenses: [], loading: true, creating: false, loadError: "" },
+  data: { tripId: "", currency: "CNY", name: "", expenses: [], loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
     this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本" })
     return this.loadExpenses()
@@ -38,6 +38,17 @@ Page({
       .then((record) => wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(record.id)}` }))
       .catch((error) => wx.showToast({ title: error.message || "新建消费失败", icon: "none" }))
       .finally(() => this.setData({ creating: false }))
+  },
+  prepareInvite() {
+    if (this.data.inviting) return Promise.resolve()
+    this.setData({ inviting: true, inviteReady: false, invitePath: "" })
+    return createTripInvite(this.data.tripId)
+      .then((invite) => this.setData({ inviteReady: true, invitePath: `/pages/trip-invite/index?token=${encodeURIComponent(invite.token)}` }))
+      .catch((error) => wx.showToast({ title: error.message || "创建邀请失败", icon: "none" }))
+      .finally(() => this.setData({ inviting: false }))
+  },
+  onShareAppMessage() {
+    return { title: "邀请你一起记旅行账", path: this.data.invitePath }
   },
 })
 
