@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 import httpx
-
 from app.core.money import decimal_from_string
 
 

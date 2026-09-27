@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAi, DeepSeekReceiptAiError
 
 
