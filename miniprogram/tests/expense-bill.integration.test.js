@@ -35,6 +35,24 @@ test("createExpense adds a UUID idempotency key", async () => {
   assert.match(calls[0].header["Idempotency-Key"], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 })
 
+test("expense API reads a trip list and updates a revision", async () => {
+  const calls = []
+  const api = loadApi(calls)
+
+  await api.listExpenses("trip-1")
+  await api.updateExpense("trip-1", "expense-1", 2, "2026-09-27", { title: "晚餐" })
+
+  assert.equal(calls[0].url, "https://example.test/v1/trips/trip-1/expenses")
+  assert.equal(calls[0].method, "GET")
+  assert.equal(calls[1].url, "https://example.test/v1/trips/trip-1/expenses/expense-1")
+  assert.equal(calls[1].method, "PATCH")
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1].data)), {
+    revision: 2,
+    occurred_at: "2026-09-27",
+    payload: { title: "晚餐" },
+  })
+})
+
 function loadExpensePage(api, wx = {}) {
   const source = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.js"), "utf8")
   let definition
