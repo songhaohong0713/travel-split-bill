@@ -15,9 +15,9 @@ from app.providers.cloudbase_pg import (
     CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
-from app.providers.cloudbase_receipt_ai import (
-    CloudBaseReceiptAi,
-    CloudBaseReceiptAiError,
+from app.providers.deepseek_receipt_ai import (
+    DeepSeekReceiptAi,
+    DeepSeekReceiptAiError,
 )
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
 
@@ -56,8 +56,8 @@ def configure_receipt_ai() -> None:
     if getattr(app.state, "receipt_ai", None) is not None:
         return
     try:
-        app.state.receipt_ai = CloudBaseReceiptAi.from_environment()
-    except CloudBaseReceiptAiError:
+        app.state.receipt_ai = DeepSeekReceiptAi.from_environment()
+    except DeepSeekReceiptAiError:
         app.state.receipt_ai = None
 
 app.include_router(auth_router)

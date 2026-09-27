@@ -3,7 +3,8 @@ from datetime import date
 
 import httpx
 import pytest
-from app.main import app, configure_wechat_auth
+from app.main import app, configure_receipt_ai, configure_wechat_auth
+from app.providers.deepseek_receipt_ai import DeepSeekReceiptAi
 from app.providers.rates import FrankfurterRates, RateUnavailable
 from app.providers.receipt_ocr import parse_text_lines
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
@@ -53,6 +54,19 @@ def test_configure_wechat_auth_uses_cloudbase_environment(monkeypatch: pytest.Mo
     assert isinstance(provider, WechatCode2Session)
     assert provider.app_id == "wx-test-app-id"
     assert provider.app_secret == "test-app-secret"
+
+
+def test_configure_receipt_ai_uses_deepseek_environment(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "receipt-model")
+    if hasattr(app.state, "receipt_ai"):
+        delattr(app.state, "receipt_ai")
+
+    configure_receipt_ai()
+
+    provider = app.state.receipt_ai
+    assert isinstance(provider, DeepSeekReceiptAi)
+    assert provider.model == "receipt-model"
 
 def test_wechat_provider_reports_wechat_error_code():
     client = httpx.AsyncClient(

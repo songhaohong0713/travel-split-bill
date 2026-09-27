@@ -12,7 +12,7 @@ from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
     CloudBasePgUnavailable,
 )
-from app.providers.cloudbase_receipt_ai import CloudBaseReceiptAiError
+from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
 
 router = APIRouter(prefix="/v1", tags=["uploads"])
 
@@ -88,7 +88,7 @@ async def _recognize(provider: object, image_bytes: bytes) -> tuple[str, int, li
         try:
             candidates = await provider.recognize(image_bytes)
             return "needs_review", attempts, candidates, None
-        except CloudBaseReceiptAiError:
+        except DeepSeekReceiptAiError:
             continue
     return "failed", 3, [], "OCR_FAILED"
 
