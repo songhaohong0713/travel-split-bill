@@ -1,6 +1,9 @@
+from datetime import date
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -10,10 +13,9 @@ from app.core.allocation import Allocation
 from app.core.money import Money
 from app.core.settlement import (
     Adjustment,
-    CalculateSettlementInput,
     Expense,
     LineItem,
-    calculate_settlement,
+    calculate_grouped_settlement,
 )
 from app.db.models import SettlementVersion, Trip
 from app.providers.cloudbase_pg import (
@@ -21,6 +23,7 @@ from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
     CloudBasePgUnavailable,
 )
+from app.providers.rates import FrankfurterRates, RateUnavailable
 
 router = APIRouter(prefix="/v1", tags=["settlements"])
 
@@ -78,8 +81,9 @@ class ExpenseInput(BaseModel):
     payment_to_settlement_rate: str | None = None
     payment_to_settlement_rate_source: str | None = None
     rounding_owner_id: str | None = None
+    settlement_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
 
-    def to_expense(self) -> Expense:
+    def to_expense(self, default_settlement_currency: str) -> Expense:
         return Expense(
             expense_id=self.expense_id,
             payer_id=self.payer_id,
@@ -95,6 +99,7 @@ class ExpenseInput(BaseModel):
             payment_to_settlement_rate=self.payment_to_settlement_rate,
             payment_to_settlement_rate_source=self.payment_to_settlement_rate_source,
             rounding_owner_id=self.rounding_owner_id,
+            settlement_currency=self.settlement_currency or default_settlement_currency,
         )
 
 
@@ -107,6 +112,29 @@ class PreviewRequest(BaseModel):
 def _money(money: Money) -> dict[str, str]:
     return {"currency": money.currency, "amount": money.amount}
 
+
+def _result_payload(result) -> dict[str, object]:
+    return {
+        "responsibility_by_participant": {key: _money(value) for key, value in result.responsibility_by_participant.items()},
+        "paid_by_participant": {key: _money(value) for key, value in result.paid_by_participant.items()},
+        "net_by_participant": {key: _money(value) for key, value in result.net_by_participant.items()},
+        "transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers],
+        "audit_lines": [{"expense_id": line.expense_id, "participant_id": line.participant_id, "amount": _money(line.amount), "reason": line.reason, "rate_source": line.rate_source} for line in result.audit_lines],
+    }
+
+
+def _grouped_payload(participants: tuple[str, ...], expenses: tuple[Expense, ...]) -> dict[str, object]:
+    groups = calculate_grouped_settlement(participants, expenses)
+    result: dict[str, object] = {
+        "groups": [
+            {"currency": currency, **_result_payload(group)}
+            for currency, group in groups.items()
+        ]
+    }
+    if len(groups) == 1:
+        result.update(_result_payload(next(iter(groups.values()))))
+    return result
+
 def _cloudbase(request: Request) -> CloudBasePgClient | None:
     return getattr(request.app.state, "cloudbase_pg", None)
 
@@ -115,6 +143,26 @@ def _cloudbase_error(exc: Exception) -> HTTPException:
         status_code=503,
         detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
     )
+
+
+@router.get("/exchange-rates")
+async def exchange_rate(
+    _: CurrentUser,
+    requested_date: Annotated[date, Query(alias="date")],
+    from_currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")],
+    to_currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")],
+) -> dict[str, object]:
+    try:
+        async with httpx.AsyncClient() as client:
+            quote = await FrankfurterRates(client).quote(
+                requested_date, from_currency, to_currency
+            )
+    except RateUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "RATE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
+    return {"data": quote}
 
 
 
@@ -134,15 +182,15 @@ async def preview_settlement(
         trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
         if trip is None:
             raise _not_found()
-    result = calculate_settlement(CalculateSettlementInput(settlement_currency=body.settlement_currency, participants=tuple(body.participants), expenses=tuple(expense.to_expense() for expense in body.expenses)))
-    return {"data": {"responsibility_by_participant": {key: _money(value) for key, value in result.responsibility_by_participant.items()}, "paid_by_participant": {key: _money(value) for key, value in result.paid_by_participant.items()}, "net_by_participant": {key: _money(value) for key, value in result.net_by_participant.items()}, "transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers], "audit_lines": [{"expense_id": line.expense_id, "participant_id": line.participant_id, "amount": _money(line.amount), "reason": line.reason, "rate_source": line.rate_source} for line in result.audit_lines]}}
+    expenses = tuple(expense.to_expense(body.settlement_currency) for expense in body.expenses)
+    return {"data": _grouped_payload(tuple(body.participants), expenses)}
 
 @router.post("/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED)
 async def publish_settlement(
     trip_id: str, body: PreviewRequest, http_request: Request, session: DbSession, user_id: CurrentUser
 ) -> dict[str, object]:
-    result = calculate_settlement(CalculateSettlementInput(settlement_currency=body.settlement_currency, participants=tuple(body.participants), expenses=tuple(expense.to_expense() for expense in body.expenses)))
-    projection = {"transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers]}
+    expenses = tuple(expense.to_expense(body.settlement_currency) for expense in body.expenses)
+    projection = _grouped_payload(tuple(body.participants), expenses)
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         version_id = str(uuid4())
