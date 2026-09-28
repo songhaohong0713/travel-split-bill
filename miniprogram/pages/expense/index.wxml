@@ -18,6 +18,12 @@
   </view>
   <view class="ticket-list">
     <view class="list-heading"><text class="section-title">商品条目</text><view class="list-actions"><text class="summary-note">共 {{items.length}} 项</text><text class="batch-toggle" bindtap="toggleBatchEditing">{{batchEditing ? "完成批量编辑" : "批量编辑"}}</text></view></view>
+    <view wx:if="{{showBatchTools}}" class="batch-toolbar">
+      <view class="batch-toolbar-heading"><text>已选 {{selectedCount}} 项</text><text class="batch-finish" bindtap="toggleBatchEditing">完成</text></view>
+      <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-toolbar-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
+      <view wx:if="{{batchModeIndex === 3}}" class="ratio-row"><input type="digit" value="{{batchPayerPercent}}" bindinput="onBatchPayerPercent"/><text>% 付款人</text><input type="digit" value="{{batchFriendPercent}}" bindinput="onBatchFriendPercent"/><text>% 同行人</text></view>
+      <button class="batch-apply" bindtap="applyBatchAllocation">应用到已选商品</button>
+    </view>
     <view class="item-ledger">
     <view wx:for="{{items}}" wx:key="id" class="ledger-row" data-id="{{item.id}}" bindtap="toggleItemDetail">
       <view class="compact-item-row"><switch wx:if="{{batchEditing}}" checked="{{item.selected}}" data-id="{{item.id}}" catchchange="toggleItem" color="#124954"/><view class="compact-item-copy"><text class="compact-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-meta">{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text></view><view class="compact-item-total"><text class="compact-item-amount">¥{{item.amount || "0.00"}}</text><text class="currency">{{currency}}</text></view><text class="chevron">{{expandedItemId === item.id ? "⌃" : "›"}}</text></view>
@@ -31,12 +37,6 @@
     </view></view>
     <button class="add-ticket" bindtap="addItem">+ 手动添加商品</button>
     <view class="expense-subtotal"><text>本次消费小计</text><view><text class="subtotal-value">¥{{billTotal}}</text><text class="subtotal-currency">{{currency}}</text></view></view>
-  </view>
-  <view wx:if="{{showBatchTools}}" class="batch-bar">
-    <view><text class="section-title">批量分账</text><text class="batch-note">已选择 {{selectedCount}} 项</text></view>
-    <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
-    <view wx:if="{{batchModeIndex === 3}}" class="ratio-row"><input type="digit" value="{{batchPayerPercent}}" bindinput="onBatchPayerPercent"/><text>% 付款人</text><input type="digit" value="{{batchFriendPercent}}" bindinput="onBatchFriendPercent"/><text>% 同行人</text></view>
-    <button class="batch-apply" bindtap="applyBatchAllocation">应用到已选择商品</button>
   </view>
   <view class="adjustment-section">
     <view class="list-heading" bindtap="toggleAdjustments"><text class="section-title">账单调整</text><text class="summary-note">{{showAdjustments ? "收起" : "可选"}}</text></view><view wx:if="{{showAdjustments}}">

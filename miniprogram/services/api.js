@@ -54,7 +54,7 @@ function uploadReceipt(tripId, filePath) {
       if (response.statusCode === 202) return resolve(body.data)
       reject(body.error || { code: "NETWORK_ERROR", message: "识别请求未完成" })
     },
-    fail() { reject({ code: "NETWORK_ERROR", message: "网络不可用，请稍后重试" }) },
+    fail(error) { console.error("receipt_upload_failed", { errMsg: error.errMsg || "", hasFilePath: Boolean(filePath) }); reject({ code: "NETWORK_ERROR", message: "网络不可用，请稍后重试" }) },
   }))
 }
 

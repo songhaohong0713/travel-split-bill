@@ -135,7 +135,9 @@ Page({
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
-    const receiptPath = q.receiptPath || ""
+    const app = getApp()
+    const receiptPath = q.receiptPath || app.globalData.pendingReceiptPath || ""
+    app.globalData.pendingReceiptPath = ""
     this.syncBill({ tripId: q.tripId, currency: q.currency || "CNY", expenseId: q.expenseId || "", occurredAt, title: defaultExpenseTitle(), receiptPath, ocrStatus: receiptPath ? "等待上传识别" : "未上传" })
     const loaded = q.expenseId ? this.loadExpense(q.expenseId) : Promise.resolve()
     return loaded.then(() => { if (receiptPath) this.startOcr(receiptPath) })

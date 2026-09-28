@@ -4,12 +4,13 @@ const path = require("node:path")
 const test = require("node:test")
 const vm = require("node:vm")
 
-function loadTripDetail(api, wx = {}) {
+function loadTripDetail(api, wx = {}, app = { globalData: {} }) {
   const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.js"), "utf8")
   let definition
   vm.runInNewContext(source, {
     Page(value) { definition = value },
     require() { return api },
+    getApp() { return app },
     wx: { showToast() {}, navigateTo() {}, ...wx },
     Date,
     Math,
@@ -43,6 +44,7 @@ test("trip detail lists saved expenses as compact summaries", async () => {
 test("trip detail creates a dated expense after choosing a receipt", async () => {
   let created
   let destination = ""
+  const app = { globalData: {} }
   const definition = loadTripDetail({
     listExpenses() { return Promise.resolve([]) },
     createExpense(_tripId, occurredAt, payload) {
@@ -51,8 +53,9 @@ test("trip detail creates a dated expense after choosing a receipt", async () =>
     },
   }, {
     chooseMedia({ success }) { success({ tempFiles: [{ tempFilePath: "wxfile://receipt.jpg" }] }) },
+    compressImage({ success }) { success({ tempFilePath: "wxfile://compressed-receipt.jpg" }) },
     navigateTo({ url }) { destination = url },
-  })
+  }, app)
   const page = pageInstance(definition, { tripId: "trip-1", currency: "CNY" })
 
   await page.chooseReceiptAndCreate()
@@ -60,7 +63,8 @@ test("trip detail creates a dated expense after choosing a receipt", async () =>
   assert.match(created.payload.title, /^\d+月\d+日消费$/)
   assert.equal(created.payload.expenses[0].items.length, 0)
   assert.match(destination, /expenseId=expense-1/)
-  assert.match(destination, /receiptPath=wxfile%3A%2F%2Freceipt.jpg/)
+  assert.doesNotMatch(destination, /receiptPath=/)
+  assert.equal(app.globalData.pendingReceiptPath, "wxfile://compressed-receipt.jpg")
 })
 
 test("trip detail exposes compact expense summaries and a receipt-first action", () => {

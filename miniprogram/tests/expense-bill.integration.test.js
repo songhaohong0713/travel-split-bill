@@ -53,13 +53,14 @@ test("expense API reads a trip list and updates a revision", async () => {
   })
 })
 
-function loadExpensePage(api, wx = {}) {
+function loadExpensePage(api, wx = {}, app = { globalData: {} }) {
   const source = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.js"), "utf8")
   let definition
   const module = { exports: {} }
   vm.runInNewContext(source, {
     Page(value) { definition = value },
     require() { return api },
+    getApp() { return app },
     wx: { showToast() {}, ...wx },
     setTimeout() {},
     module,
@@ -105,16 +106,18 @@ test("expense helpers provide a dated title, hydrate a record, and combine a tri
 })
 
 test("expense page starts OCR for a receipt selected before navigation", async () => {
-  const { definition } = loadExpensePage({})
+  const app = { globalData: { pendingReceiptPath: "wxfile://receipt.jpg" } }
+  const { definition } = loadExpensePage({}, {}, app)
   const instance = pageInstance(definition)
   let receivedPath = ""
   instance.startOcr = (filePath) => { receivedPath = filePath }
 
-  await instance.onLoad({ tripId: "trip-1", currency: "JPY", receiptPath: "wxfile://receipt.jpg" })
+  await instance.onLoad({ tripId: "trip-1", currency: "JPY" })
 
   assert.equal(instance.data.receiptPath, "wxfile://receipt.jpg")
   assert.equal(instance.data.ocrStatus, "等待上传识别")
   assert.equal(receivedPath, "wxfile://receipt.jpg")
+  assert.equal(app.globalData.pendingReceiptPath, "")
 })
 
 test("validateBill rejects custom shares that are not 100 percent", () => {
@@ -161,6 +164,13 @@ test("batch selection stays hidden until explicit batch editing begins", () => {
   instance.toggleBatchEditing()
   assert.equal(instance.data.batchEditing, true)
   assert.equal(instance.data.showBatchTools, true)
+})
+
+test("expense page uses a compact inline toolbar for batch allocation", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /class="batch-toolbar"/)
+  assert.doesNotMatch(wxml, /class="batch-bar"/)
+  assert.match(wxml, /已选 {{selectedCount}} 项/)
 })
 
 test("buildBillPayload applies a bill tax only once", () => {
@@ -261,7 +271,7 @@ test("receipt recognition keeps the selected currency for mixed currencies", () 
 test("expense page exposes receipt-book layout hooks", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /class="bill-summary"/)
-  assert.match(wxml, /class="batch-bar"/)
+  assert.match(wxml, /class="batch-toolbar"/)
   assert.match(wxml, /class="checkout-bar"/)
 })
 
