@@ -2,14 +2,17 @@
   <view class="masthead"><text class="kicker">TRAVEL LEDGER</text><text class="title">{{name}}</text><text class="subtitle">每一笔消费，都清楚记下。</text></view>
   <view wx:if="{{loading}}" class="state-card"><text>正在整理消费记录…</text></view>
   <view wx:elif="{{loadError}}" class="state-card error"><text>{{loadError}}</text></view>
-  <view wx:elif="{{expenses.length}}" class="expense-list">
+  <block wx:elif="{{expenses.length}}">
+  <view class="trip-overview"><text class="overview-label">旅行总消费</text><view><text class="overview-total">¥{{overview.total}}</text><text class="overview-currency">{{overview.currency}}</text></view><text class="overview-note">已记录 {{overview.recordCount}} 笔消费</text><text wx:if="{{overview.mixedCurrency}}" class="overview-warning">含其他币种，未合并换算</text></view>
+  <view class="expense-list">
     <view class="list-heading"><text class="section-title">消费记录</text><text class="section-note">共 {{expenses.length}} 笔</text></view>
     <view wx:for="{{expenses}}" wx:key="id" class="expense-summary" data-id="{{item.id}}" bindtap="openExpense">
-      <view class="summary-top"><text class="expense-title">{{item.title}}</text><text class="amount">¥{{item.total}}</text></view>
+      <view class="summary-top"><text class="expense-title">{{item.title}}</text><view><text class="amount">¥{{item.total}}</text><text class="currency">{{item.currency}}</text></view></view>
       <text class="expense-meta">{{item.occurredAt}} · {{item.itemCount}} 项 · {{item.payer || "待填写付款人"}}</text>
       <view class="expense-actions"><text class="expense-preview">查看商品与分账 ›</text><text wx:if="{{isOwner || item.isCreator}}" class="delete-link" data-id="{{item.id}}" catchtap="deleteExpenseRecord">删除</text></view>
     </view>
   </view>
+  </block>
   <view wx:else class="empty-state"><text class="empty-title">还没有消费记录</text><text class="empty-copy">先记下第一笔消费，再逐项分账。</text></view>
   <view class="actions"><button class="primary" bindtap="chooseReceiptAndCreate" loading="{{creating}}" disabled="{{creating}}">拍小票，记录消费</button><button class="secondary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">手动录入</button></view>
   <button wx:if="{{isOwner}}" class="invite-button" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">邀请同行人</button>

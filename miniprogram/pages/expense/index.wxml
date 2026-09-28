@@ -1,4 +1,13 @@
 <view class="page expense-page">
+  <view wx:if="{{reading}}" class="expense-reading">
+    <view class="masthead"><text class="kicker">消费详情</text><text class="reading-title">{{title}}</text><text class="expense-date">{{occurredAt}}</text></view>
+    <view class="reading-total"><text>本笔消费</text><view><text class="reading-amount">¥{{billTotal}}</text><text class="currency">{{currency}}</text></view></view>
+    <view class="reading-card"><text class="section-title">付款与结算</text><view class="reading-line"><text>付款人</text><text>{{payer}}</text></view><view class="reading-line"><text>结算方式</text><text wx:if="{{actualPaymentAmount}}">实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}}</text><text wx:elif="{{currency === settlementCurrency}}">原币结算</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}}</text><text wx:else>待补充汇率</text></view></view>
+    <view class="reading-card"><view class="list-heading"><text class="section-title">商品明细</text><text class="summary-note">共 {{items.length}} 项</text></view><view wx:for="{{items}}" wx:key="id" class="reading-item"><view><text class="reading-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-meta">{{item.allocationMode === 'payer' ? '付款人承担' : item.allocationMode === 'friend' ? '同行人承担' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text></view><view><text class="compact-item-amount">¥{{item.amount}}</text><text class="currency">{{currency}}</text></view></view></view>
+    <view wx:if="{{taxAmount || adjustmentAmount}}" class="reading-card"><text class="section-title">账单调整</text><view wx:if="{{taxAmount}}" class="reading-line"><text>税额</text><text>¥{{taxAmount}} {{currency}}</text></view><view wx:if="{{adjustmentAmount}}" class="reading-line"><text>{{adjustmentLabels[adjustmentType]}}</text><text>¥{{adjustmentAmount}} {{currency}}</text></view></view>
+    <button class="reading-edit" bindtap="beginEditing">编辑此笔消费</button>
+  </view>
+  <view wx:else class="expense-editor">
   <view class="masthead">
     <text class="kicker">TRAVEL SPLIT</text>
     <input class="expense-title-input" value="{{title}}" bindinput="onTitle" placeholder="消费名称"/>
@@ -57,5 +66,6 @@
   <view class="checkout-bar">
     <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
     <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">保存并查看分账</button>
+  </view>
   </view>
 </view>

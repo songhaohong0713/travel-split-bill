@@ -41,6 +41,18 @@ test("trip detail lists saved expenses as compact summaries", async () => {
   assert.equal(page.data.expenses[0].total, "30.00")
 })
 
+test("trip detail derives a same-currency overview without mixing other currencies", async () => {
+  const definition = loadTripDetail({ listExpenses: () => Promise.resolve([
+    { id: "a", occurred_at: "2026-09-27", payload: { expenses: [{ items: [{ amount: { amount: "20", currency: "CNY" } }] }] } },
+    { id: "b", occurred_at: "2026-09-28", payload: { expenses: [{ items: [{ amount: { amount: "100", currency: "JPY" } }] }] } },
+  ]) })
+  const page = pageInstance(definition)
+  await page.onLoad({ tripId: "trip-1", currency: "CNY" })
+  assert.equal(page.data.overview.recordCount, 2)
+  assert.equal(page.data.overview.total, "20.00")
+  assert.equal(page.data.overview.mixedCurrency, true)
+})
+
 test("trip detail opens a local draft after choosing a receipt without creating an expense", async () => {
   let destination = ""
   const app = { globalData: {} }

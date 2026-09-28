@@ -145,6 +145,17 @@ test("expense page starts OCR for a receipt selected before navigation", async (
   assert.equal(app.globalData.pendingReceiptPath, "")
 })
 
+test("saved expense opens in reading mode until edit is requested", async () => {
+  const { definition } = loadExpensePage({
+    listExpenses() { return Promise.resolve([{ id: "expense-1", revision: 1, occurred_at: "2026-09-28", payload: { title: "便利店", participants: ["我"], expenses: [{ payer_id: "我", items: [{ item_id: "tea", name: "绿茶", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }] }] } }]) },
+  })
+  const instance = pageInstance(definition)
+  await instance.onLoad({ tripId: "trip-1", expenseId: "expense-1", currency: "CNY" })
+  assert.equal(instance.data.reading, true)
+  instance.beginEditing()
+  assert.equal(instance.data.reading, false)
+})
+
 test("validateBill rejects custom shares that are not 100 percent", () => {
   const { helpers } = loadExpensePage({})
   assert.match(helpers.validateBill({ payer: "我", friend: "小王", items: [{ name: "餐费", amount: "20", allocationMode: "custom", payerPercent: "70", friendPercent: "20" }] }), /100%/)

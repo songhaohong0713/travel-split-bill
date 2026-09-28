@@ -12,19 +12,26 @@ function expenseSummary(record, currency) {
   const bill = (record.payload.expenses || [])[0] || {}
   const items = bill.items || []
   const total = items.reduce((sum, item) => sum + Math.round(Number(item.amount && item.amount.amount) * 100 || 0), 0)
-  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, total: (total / 100).toFixed(2), currency, isCreator: Boolean(record.is_creator) }
+  const itemCurrency = items[0] && items[0].amount && items[0].amount.currency || currency
+  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, total: (total / 100).toFixed(2), currency: itemCurrency, isCreator: Boolean(record.is_creator) }
 }
 
+function buildOverview(records, currency) {
+  const summaries = records.map((record) => expenseSummary(record, currency))
+  const included = summaries.filter((record) => record.currency === currency)
+  const cents = included.reduce((total, record) => total + Math.round(Number(record.total) * 100 || 0), 0)
+  return { recordCount: records.length, total: (cents / 100).toFixed(2), currency, mixedCurrency: included.length !== summaries.length }
+}
 
 Page({
-  data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
+  data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
     this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
     return this.loadExpenses()
   },
   loadExpenses() {
     return listExpenses(this.data.tripId)
-      .then((records) => this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency)), loading: false, loadError: "" }))
+      .then((records) => this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency)), overview: buildOverview(records, this.data.currency), loading: false, loadError: "" }))
       .catch(() => this.setData({ loading: false, loadError: "暂时无法读取消费记录" }))
   },
   openExpense(event) {
@@ -74,4 +81,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { defaultExpenseTitle, expenseSummary }
+if (typeof module !== "undefined") module.exports = { buildOverview, defaultExpenseTitle, expenseSummary }
