@@ -14,6 +14,7 @@ from app.core.settlement import (
     Expense,
     LineItem,
     Transfer,
+    calculate_grouped_settlement,
     calculate_settlement,
     later_tax_refund,
 )
@@ -116,6 +117,46 @@ def test_actual_payment_can_be_converted_to_a_different_settlement_currency() ->
     assert {line.rate_source for line in result.audit_lines} == {
         "actual-payment+manual-payment-rate"
     }
+
+
+def test_grouped_settlement_keeps_transfers_in_their_own_currency() -> None:
+    expenses = (
+        Expense(
+            expense_id="jpy-purchase",
+            payer_id="owner",
+            settlement_currency="JPY",
+            items=(
+                LineItem(
+                    item_id="jpy-item",
+                    amount=money("JPY", "1000"),
+                    allocation=person_allocation("friend"),
+                ),
+            ),
+            actual_payment=money("JPY", "1000"),
+        ),
+        Expense(
+            expense_id="cny-purchase",
+            payer_id="owner",
+            settlement_currency="CNY",
+            items=(
+                LineItem(
+                    item_id="cny-item",
+                    amount=money("CNY", "20"),
+                    allocation=person_allocation("friend"),
+                ),
+            ),
+            actual_payment=money("CNY", "20"),
+        ),
+    )
+
+    grouped = calculate_grouped_settlement(("owner", "friend"), expenses)
+
+    assert grouped["JPY"].transfers == (
+        Transfer("friend", "owner", money("JPY", "1000")),
+    )
+    assert grouped["CNY"].transfers == (
+        Transfer("friend", "owner", money("CNY", "20.00")),
+    )
 
 
 def test_tax_included_in_item_price_is_not_charged_twice() -> None:
