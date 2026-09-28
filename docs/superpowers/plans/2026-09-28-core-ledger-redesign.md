@@ -20,7 +20,7 @@
 
 ## 文件结构
 
-- miniprogram/pages/trip-detail/index.wxml、index.wxss：旅行消费摘要与录入入口。
+- miniprogram/pages/trip-detail/index.js、index.wxml、index.wxss：旅行消费摘要与小票优先录入入口。
 - miniprogram/pages/expense/index.js：显式批量编辑状态。
 - miniprogram/pages/expense/index.wxml、index.wxss：小票优先入口、账本行与小计。
 - miniprogram/pages/settlement/index.wxml、index.wxss：结算单层级。
@@ -31,11 +31,12 @@
 **Files:**
 - Modify: miniprogram/pages/trip-detail/index.wxml
 - Modify: miniprogram/pages/trip-detail/index.wxss
+- Modify: miniprogram/pages/trip-detail/index.js
 - Modify: miniprogram/tests/trip-detail.integration.test.js
 
 **Interfaces:**
 - Consumes: expenses[] 的 id, occurredAt, title, payer, itemCount, total, currency。
-- Produces: 每项保留 data-id 与 bindtap="openExpense"；createExpenseRecord 不变。
+- Produces: 每项保留 data-id 与 bindtap="openExpense"；createExpenseRecord 接收用户选择的小票临时路径并传入消费页。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -65,11 +66,21 @@ Expected: FAIL，缺少 expense-summary 或“拍小票，记录消费”。
 
 将主按钮文案替换成“拍小票，记录消费”，邀请按钮不变。
 
-- [ ] **Step 4: 实施最小 WXSS**
+- [ ] **Step 4: 让主按钮先选择小票，再创建消费**
+
+将 createExpenseRecord 改为先调用 wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"] })；用户取消时直接结束。选择成功后，创建空消费记录，并把 tempFiles[0].tempFilePath 通过 receiptPath 查询参数传给消费页：
+
+~~~js
+wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(record.id)}&receiptPath=${encodeURIComponent(receiptPath)}` })
+~~~
+
+消费页 onLoad 读取 receiptPath，设置 receiptPath 和“等待上传识别”，再调用现有 startOcr(receiptPath)。保留一个次级“手动录入”按钮，调用现有的空消费创建流程，不传 receiptPath。
+
+- [ ] **Step 5: 实施最小 WXSS**
 
 页面底色设为 #F6F4EC。expense-list 保持一个纸面容器；expense-summary 只使用细分隔线，不用独立阴影卡。金额用 #D06A42，expense-preview 用 #718186 与 22rpx；主按钮用 #124954。
 
-- [ ] **Step 5: 验证并提交**
+- [ ] **Step 6: 验证并提交**
 
 Run: node --test miniprogram/tests/trip-detail.integration.test.js
 Expected: PASS。
