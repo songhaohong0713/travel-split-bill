@@ -12,6 +12,7 @@
 .route-arrow { color: #66767A; font-size: 22rpx; }
 .transfer-amount { text-align: right; white-space: nowrap; }
 .amount-currency { display: block; color: #66767A; font-size: 20rpx; }
+.transfer-list + .transfer-list { margin-top: 18rpx; padding-top: 18rpx; border-top: 2rpx solid #E8E1D6; }.currency-settled { display: block; margin-top: 12rpx; color: #718186; font-size: 23rpx; }
 .amount-value { display: block; margin-top: 4rpx; color: #C86D45; font-size: 38rpx; font-weight: 700; font-variant-numeric: tabular-nums; }
 .settled-state { padding: 54rpx 28rpx; text-align: center; background: #E8F0EA; border-color: #D0DED4; }
 .settled-mark { display: flex; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; margin: 0 auto 18rpx; color: #FFFDF8; background: #123E45; border-radius: 50%; font-size: 36rpx; }

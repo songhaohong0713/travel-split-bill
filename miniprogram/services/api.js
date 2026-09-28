@@ -28,6 +28,7 @@ function login() {
 }
 
 function createTrip(name, defaultCurrency) { return request("/v1/trips", { method: "POST", data: { name, default_currency: defaultCurrency } }) }
+function getExchangeRate(date, fromCurrency, toCurrency) { return request(`/v1/exchange-rates?date=${encodeURIComponent(date)}&from_currency=${encodeURIComponent(fromCurrency)}&to_currency=${encodeURIComponent(toCurrency)}`) }
 function listTrips() { return request("/v1/trips") }
 function listTripMembers(tripId) { return request(`/v1/trips/${tripId}/members`) }
 function createTripInvite(tripId) { return request(`/v1/trips/${tripId}/invites`, { method: "POST" }) }
@@ -59,4 +60,4 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, createTrip, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
+module.exports = { request, login, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
