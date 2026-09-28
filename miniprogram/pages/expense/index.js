@@ -5,6 +5,7 @@ function newItem() {
 }
 
 function allocationFor(item, payer, friend) {
+  if (!friend) return { [payer]: "1" }
   if (item.allocationMode === "payer") return { [payer]: "1" }
   if (item.allocationMode === "friend") return { [friend]: "1" }
   if (item.allocationMode === "split") return { [payer]: "0.5", [friend]: "0.5" }
@@ -76,8 +77,8 @@ function hydrateExpense(record) {
 }
 
 function buildTripPreview(records, currency) {
-  const participants = records[0] && records[0].payload && records[0].payload.participants || []
-  if (!participants.length || records.some((record) => JSON.stringify(record.payload.participants || []) !== JSON.stringify(participants))) return null
+  const participants = [...new Set(records.flatMap((record) => record.payload && record.payload.participants || []))]
+  if (!participants.length) return null
   return { settlement_currency: currency, participants, expenses: records.flatMap((record) => record.payload.expenses || []) }
 }
 
@@ -87,10 +88,17 @@ function billTotal(items, taxAmount, taxIncluded, adjustmentAmount) {
   return money(itemTotal + tax + (cents(adjustmentAmount) || 0))
 }
 
+function estimatedSettlementAmount(total, rate) {
+  const amount = Number(total)
+  const referenceRate = Number(rate)
+  return Number.isFinite(amount) && amount > 0 && Number.isFinite(referenceRate) && referenceRate > 0
+    ? (amount * referenceRate).toFixed(2)
+    : ""
+}
+
 function validateBill(data) {
   if (!data.payer || !data.payer.trim()) return "请填写付款人"
-  if (!data.friend || !data.friend.trim()) return "请填写同行人"
-  if (data.payer.trim() === data.friend.trim()) return "两位参与人不能相同"
+  if (data.friend && data.payer.trim() === data.friend.trim()) return "两位参与人不能相同"
   if (!data.items || !data.items.length) return "请至少添加一件商品"
   for (const item of data.items) {
     if (!item.name || !item.name.trim()) return "请填写每件商品名称"
@@ -125,7 +133,7 @@ function buildBillPayload(data) {
   if (data.adjustmentAmount) paidCents += cents(data.adjustmentAmount)
   return {
     title: data.title || defaultExpenseTitle(),
-    participants: [payer, friend],
+    participants: friend ? [payer, friend] : [payer],
     settlement_currency: data.settlementCurrency || data.currency,
     expenses: [{
       expense_id: data.expensePayloadId || `bill-${Date.now()}`,
@@ -145,10 +153,11 @@ function settlementUrl(tripId, preview, result) {
 }
 
 Page({
-  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", settlementCurrency: "CNY", settlementCurrencies: ["CNY", "JPY", "USD", "KRW"], settlementCurrencyIndex: 0, settlementCurrencyLocked: false, actualPaymentAmount: "", actualPaymentCurrency: "", actualPaymentCurrencyIndex: 0, referenceRate: "", referenceRateSource: "", rateEffectiveDate: "", rateStatus: "", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", batchEditing: false, showBatchTools: false, showAdjustments: false, expandedItemId: "" },
+  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", settlementCurrency: "CNY", settlementCurrencies: ["CNY", "JPY", "USD", "KRW"], settlementCurrencyIndex: 0, settlementCurrencyLocked: false, actualPaymentAmount: "", actualPaymentCurrency: "", actualPaymentCurrencyIndex: 0, referenceRate: "", referenceRateSource: "", rateEffectiveDate: "", rateStatus: "", estimatedSettlementAmount: "", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", batchEditing: false, showBatchTools: false, showAdjustments: false, expandedItemId: "" },
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
-    this.setData({ ...changes, settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing), billTotal: billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount) })
+    const nextBillTotal = billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount)
+    this.setData({ ...changes, settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing && next.friend), billTotal: nextBillTotal, estimatedSettlementAmount: next.actualPaymentAmount ? "" : estimatedSettlementAmount(nextBillTotal, next.referenceRate) })
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
@@ -224,7 +233,7 @@ Page({
       ? updateExpense(this.data.tripId, this.data.expenseId, this.data.revision, this.data.occurredAt, previewPayload)
       : createExpense(this.data.tripId, this.data.occurredAt, previewPayload)
     return save
-      .then((saved) => listExpenses(this.data.tripId).then((records) => records.map((record) => record.id === saved.id ? saved : record)))
+      .then((saved) => { this.syncBill({ expenseId: saved.id, revision: saved.revision, occurredAt: saved.occurred_at }); return listExpenses(this.data.tripId).then((records) => records.map((record) => record.id === saved.id ? saved : record)) })
       .then((records) => {
         const tripPreview = buildTripPreview(records, this.data.currency)
         if (!tripPreview) throw new Error("请先统一每笔消费的两位同行人")
@@ -236,4 +245,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { allocationFor, applyActualPayment, billTotal, buildBillPayload, buildTripPreview, defaultExpenseTitle, hydrateExpense, selectedItemCount, validateBill }
+if (typeof module !== "undefined") module.exports = { allocationFor, applyActualPayment, billTotal, buildBillPayload, buildTripPreview, defaultExpenseTitle, estimatedSettlementAmount, hydrateExpense, selectedItemCount, validateBill }

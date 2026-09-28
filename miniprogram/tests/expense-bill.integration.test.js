@@ -141,6 +141,29 @@ test("saveAndPreview persists then settles every expense in the trip", async () 
   assert.deepEqual(calls, ["save", "list", "preview"])
 })
 
+test("a successful update keeps the latest revision for the next edit", async () => {
+  const { definition } = loadExpensePage({
+    updateExpense() { return Promise.resolve({ id: "expense-1", revision: 2, occurred_at: "2026-09-28", payload: { participants: ["我"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }) },
+    listExpenses() { return Promise.resolve([{ id: "expense-1", revision: 2, payload: { participants: ["我"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }]) },
+    previewSettlement() { return Promise.resolve({ transfers: [] }) }, uploadReceipt() {}, getReceiptJob() {},
+  }, { navigateTo() {} })
+  const instance = pageInstance(definition, { tripId: "trip-1", expenseId: "expense-1", revision: 1, occurredAt: "2026-09-28", currency: "CNY", settlementCurrency: "CNY", payer: "我", friend: "", items: [{ id: "a", name: "晚餐", amount: "20", allocationMode: "payer", payerPercent: "100", friendPercent: "0", selected: false }] })
+
+  await instance.saveAndPreview()
+
+  assert.equal(instance.data.revision, 2)
+})
+
+test("a personal expense needs no companion and estimates settlement currency", () => {
+  const { helpers } = loadExpensePage({})
+  const payload = helpers.buildBillPayload({ currency: "JPY", settlementCurrency: "CNY", payer: "我", friend: "", items: [{ id: "a", name: "晚餐", amount: "6155", allocationMode: "payer", payerPercent: "100", friendPercent: "0" }], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0 })
+
+  assert.equal(helpers.validateBill({ payer: "我", friend: "", currency: "CNY", settlementCurrency: "CNY", items: [{ name: "晚餐", amount: "20", allocationMode: "payer", payerPercent: "100", friendPercent: "0" }] }), "")
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.participants)), ["我"])
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.expenses[0].items[0].allocation)), { "我": "1" })
+  assert.equal(helpers.estimatedSettlementAmount("6155.00", "0.04254"), "261.83")
+})
+
 test("batch allocation changes only selected items", () => {
   const { definition } = loadExpensePage({}, { showToast() {} })
   const instance = pageInstance(definition, {
@@ -157,7 +180,7 @@ test("batch allocation changes only selected items", () => {
 
 test("batch selection stays hidden until explicit batch editing begins", () => {
   const { definition } = loadExpensePage({}, { showToast() {} })
-  const instance = pageInstance(definition, { items: [{ id: "a", selected: true, amount: "20" }] })
+  const instance = pageInstance(definition, { friend: "小王", items: [{ id: "a", selected: true, amount: "20" }] })
 
   assert.equal(instance.data.batchEditing, false)
   assert.equal(instance.data.showBatchTools, false)
