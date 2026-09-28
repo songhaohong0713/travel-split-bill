@@ -141,6 +141,19 @@ test("saveAndPreview persists then settles every expense in the trip", async () 
   assert.deepEqual(calls, ["save", "list", "preview"])
 })
 
+test("expense API deletes a trip and one expense", async () => {
+  const calls = []
+  const api = loadApi(calls)
+
+  await api.deleteExpense("trip-1", "expense-1")
+  await api.deleteTrip("trip-1")
+
+  assert.equal(calls[0].method, "DELETE")
+  assert.equal(calls[0].url, "https://example.test/v1/trips/trip-1/expenses/expense-1")
+  assert.equal(calls[1].method, "DELETE")
+  assert.equal(calls[1].url, "https://example.test/v1/trips/trip-1")
+})
+
 test("a successful update keeps the latest revision for the next edit", async () => {
   const { definition } = loadExpensePage({
     updateExpense() { return Promise.resolve({ id: "expense-1", revision: 2, occurred_at: "2026-09-28", payload: { participants: ["我"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }) },

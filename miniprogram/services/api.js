@@ -43,6 +43,8 @@ function uuid4() {
 function createExpense(tripId, occurredAt, payload) { return request(`/v1/trips/${tripId}/expenses`, { method: "POST", data: { occurred_at: occurredAt, payload }, header: { "Idempotency-Key": uuid4() } }) }function previewSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/preview`, { method: "POST", data }) }
 function listExpenses(tripId) { return request(`/v1/trips/${tripId}/expenses`) }
 function updateExpense(tripId, expenseId, revision, occurredAt, payload) { return request(`/v1/trips/${tripId}/expenses/${expenseId}`, { method: "PATCH", data: { revision, occurred_at: occurredAt, payload } }) }
+function deleteExpense(tripId, expenseId) { return request(`/v1/trips/${tripId}/expenses/${expenseId}`, { method: "DELETE" }) }
+function deleteTrip(tripId) { return request(`/v1/trips/${tripId}`, { method: "DELETE" }) }
 function publishSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/publish`, { method: "POST", data }) }
 function createShareLink(tripId, expiresInDays) { return request(`/v1/trips/${tripId}/share-links`, { method: "POST", data: { expires_in_days: expiresInDays } }) }
 function uploadReceipt(tripId, filePath) {
@@ -60,4 +62,4 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
+module.exports = { request, login, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }

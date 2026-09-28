@@ -1,4 +1,8 @@
-const { createExpense, createTripInvite, listExpenses } = require("../../services/api")
+const { createExpense, createTripInvite, deleteExpense, deleteTrip, listExpenses } = require("../../services/api")
+
+function confirmDelete(content) {
+  return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
+}
 
 function defaultExpenseTitle(now = new Date()) {
   return `${now.getMonth() + 1}月${now.getDate()}日消费`
@@ -16,9 +20,9 @@ function emptyPayload(title, currency) {
 }
 
 Page({
-  data: { tripId: "", currency: "CNY", name: "", expenses: [], loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
+  data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
-    this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本" })
+    this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
     return this.loadExpenses()
   },
   loadExpenses() {
@@ -53,6 +57,21 @@ Page({
       .then((invite) => this.setData({ inviteReady: true, invitePath: `/pages/trip-invite/index?token=${encodeURIComponent(invite.token)}` }))
       .catch((error) => wx.showToast({ title: error.message || "创建邀请失败", icon: "none" }))
       .finally(() => this.setData({ inviting: false }))
+  },
+  deleteExpenseRecord(event) {
+    if (!this.data.isOwner) return Promise.resolve()
+    const { id } = event.currentTarget.dataset
+    return confirmDelete("删除后无法恢复这笔消费记录。")
+      .then((confirmed) => confirmed ? deleteExpense(this.data.tripId, id) : null)
+      .then((result) => result === null ? null : this.loadExpenses())
+      .catch((error) => wx.showToast({ title: error.message || "删除失败", icon: "none" }))
+  },
+  deleteTripRecord() {
+    if (!this.data.isOwner) return Promise.resolve()
+    return confirmDelete("将永久删除全部消费、邀请和结算记录。")
+      .then((confirmed) => confirmed ? deleteTrip(this.data.tripId) : null)
+      .then((result) => { if (result !== null) wx.navigateBack() })
+      .catch((error) => wx.showToast({ title: error.message || "删除失败", icon: "none" }))
   },
   onShareAppMessage() {
     return { title: "邀请你一起记旅行账", path: this.data.invitePath }

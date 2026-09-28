@@ -89,3 +89,12 @@ test("trip detail prepares a native share path after creating an invite", async 
     path: "/pages/trip-invite/index?token=invite-token",
   })
 })
+
+test("owner can delete one expense after confirming", async () => {
+  const definition = loadTripDetail({ deleteExpense() { return Promise.resolve() }, listExpenses() { return Promise.resolve([]) } }, { showModal({ success }) { success({ confirm: true }) } })
+  const page = pageInstance(definition, { tripId: "trip-1", isOwner: true, expenses: [{ id: "expense-1" }] })
+
+  await page.deleteExpenseRecord({ currentTarget: { dataset: { id: "expense-1" } } })
+
+  assert.deepEqual(JSON.parse(JSON.stringify(page.data.expenses)), [])
+})

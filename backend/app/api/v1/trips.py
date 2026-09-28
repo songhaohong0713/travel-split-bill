@@ -148,13 +148,14 @@ async def list_trips(
                     "name": str(row["name"]),
                     "default_currency": str(row["default_currency"]),
                     "member_count": int(row.get("member_count", 1)),
+                    "is_owner": bool(row.get("is_owner", False)),
                 }
                 for row in typed_rows
             ]
         }
 
     trips = session.scalars(select(Trip).join(TripMember).where(TripMember.user_id == user_id).order_by(Trip.created_at, Trip.id)).all()
-    return {"data": [{"id": trip.id, "name": trip.name, "default_currency": trip.default_currency, "member_count": session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip.id))} for trip in trips]}
+    return {"data": [{"id": trip.id, "name": trip.name, "default_currency": trip.default_currency, "member_count": session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip.id)), "is_owner": trip.owner_id == user_id} for trip in trips]}
 
 
 @router.get("/trips/{trip_id}/members")

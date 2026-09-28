@@ -1,5 +1,15 @@
 BEGIN;
 
+CREATE OR REPLACE FUNCTION public.tsb_list_member_trips(p_user_id text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') <> 'service_role' THEN RAISE EXCEPTION 'TSB_FORBIDDEN'; END IF;
+  RETURN coalesce((SELECT jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name, 'default_currency', t.default_currency, 'member_count', (SELECT count(*) FROM trip_members c WHERE c.trip_id=t.id), 'is_owner', t.owner_id=p_user_id) ORDER BY t.created_at, t.id) FROM trips t JOIN trip_members m ON m.trip_id=t.id WHERE m.user_id=p_user_id), '[]'::jsonb);
+END; $$;
+
+REVOKE ALL ON FUNCTION public.tsb_list_member_trips(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.tsb_list_member_trips(text) TO service_role;
+
 CREATE OR REPLACE FUNCTION public.tsb_delete_owner_expense(p_trip_id text, p_expense_id text, p_owner_id text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
