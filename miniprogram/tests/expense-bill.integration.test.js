@@ -93,16 +93,31 @@ test("expense helpers provide a dated title, hydrate a record, and combine a tri
   const { helpers } = loadExpensePage({})
   const recordA = {
     id: "expense-a", revision: 2, occurred_at: "2026-09-27",
-    payload: { title: "机场晚餐", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "a", payer_id: "我", items: [], adjustments: [] }] },
+    payload: { title: "机场晚餐", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "a", payer_id: "我", items: [{ item_id: "a-item", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }], adjustments: [] }] },
   }
   const recordB = {
     id: "expense-b", revision: 1, occurred_at: "2026-09-28",
-    payload: { title: "便利店", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "b", payer_id: "小王", items: [], adjustments: [] }] },
+    payload: { title: "便利店", participants: ["我", "小王"], settlement_currency: "CNY", expenses: [{ expense_id: "b", payer_id: "小王", items: [{ item_id: "b-item", amount: { amount: "10", currency: "CNY" }, allocation: { 小王: "1" } }], adjustments: [] }] },
   }
 
   assert.equal(helpers.defaultExpenseTitle(new Date("2026-09-27T08:00:00")), "9月27日消费")
   assert.equal(helpers.hydrateExpense(recordA).title, "机场晚餐")
   assert.equal(helpers.buildTripPreview([recordA, recordB], "CNY").expenses.length, 2)
+})
+
+test("trip preview ignores legacy empty expenses and invalid actual payments", () => {
+  const { helpers } = loadExpensePage({})
+  const preview = helpers.buildTripPreview([
+    { payload: { participants: ["我", "卢", ""], expenses: [
+      { expense_id: "legacy-invalid", payer_id: "我", settlement_currency: "JPY", actual_payment: { amount: "undefine", currency: "JPY" }, items: [{ item_id: "tea", amount: { amount: "120", currency: "JPY" }, allocation: { 我: "1" } }] },
+      { expense_id: "legacy-empty", payer_id: "我", items: [] },
+    ] } },
+    { payload: { participants: ["我", "卢"], expenses: [{ expense_id: "empty-again", payer_id: "我", items: [] }] } },
+  ], "JPY")
+
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.participants)), ["我", "卢"])
+  assert.equal(preview.expenses.length, 1)
+  assert.equal(preview.expenses[0].actual_payment, undefined)
 })
 
 test("expense page starts OCR for a receipt selected before navigation", async () => {
@@ -128,8 +143,8 @@ test("validateBill rejects custom shares that are not 100 percent", () => {
 test("saveAndPreview persists then settles every expense in the trip", async () => {
   const calls = []
   const { definition } = loadExpensePage({
-    createExpense() { calls.push("save"); return Promise.resolve({ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }) },
-    listExpenses() { calls.push("list"); return Promise.resolve([{ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [], adjustments: [] }] } }, { id: "expense-2", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-2", payer_id: "小王", items: [], adjustments: [] }] } }]) },
+    createExpense() { calls.push("save"); return Promise.resolve({ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [{ item_id: "a", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }], adjustments: [] }] } }) },
+    listExpenses() { calls.push("list"); return Promise.resolve([{ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [{ item_id: "a", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }], adjustments: [] }] } }, { id: "expense-2", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-2", payer_id: "小王", items: [{ item_id: "b", amount: { amount: "10", currency: "CNY" }, allocation: { 小王: "1" } }], adjustments: [] }] } }]) },
     previewSettlement() { calls.push("preview"); return Promise.resolve({ transfers: [] }) },
     uploadReceipt() {}, getReceiptJob() {},
   }, { navigateTo() {} })

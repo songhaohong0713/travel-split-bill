@@ -87,9 +87,17 @@ function hydrateExpense(record) {
 }
 
 function buildTripPreview(records, currency) {
-  const participants = [...new Set(records.flatMap((record) => record.payload && record.payload.participants || []))]
-  if (!participants.length) return null
-  return { settlement_currency: currency, participants, expenses: records.flatMap((record) => record.payload.expenses || []) }
+  const participants = [...new Set(records.flatMap((record) => record.payload && record.payload.participants || []).map((participant) => String(participant || "").trim()).filter(Boolean))]
+  const expenses = records.flatMap((record) => record.payload && record.payload.expenses || [])
+    .filter((expense) => Array.isArray(expense.items) && expense.items.length)
+    .map((expense) => ({
+      ...expense,
+      actual_payment: expense.actual_payment && validPositiveAmount(expense.actual_payment.amount) && /^[A-Z]{3}$/.test(String(expense.actual_payment.currency || ""))
+        ? expense.actual_payment
+        : undefined,
+    }))
+  if (!participants.length || !expenses.length) return null
+  return { settlement_currency: currency, participants, expenses }
 }
 
 function billTotal(items, taxAmount, taxIncluded, adjustmentAmount) {
