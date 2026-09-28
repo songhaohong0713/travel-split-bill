@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+import httpx
 import pytest
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAi, DeepSeekReceiptAiError
 
@@ -23,6 +24,11 @@ class FakeClient:
     async def post(self, _: str, **kwargs: object) -> FakeResponse:
         self.calls.append(kwargs)
         return FakeResponse(self.content, self.status_code)
+
+
+class TimeoutClient:
+    async def post(self, _: str, **__: object) -> FakeResponse:
+        raise httpx.ReadTimeout("request timed out")
 
 
 def test_recognize_sends_jpeg_to_deepseek_vision_endpoint() -> None:
@@ -80,3 +86,16 @@ def test_recognize_logs_only_safe_status_when_deepseek_rejects(caplog: pytest.Lo
     assert "deepseek_receipt_request_rejected status=401" in caplog.text
     assert "deepseek-key" not in caplog.text
     assert "provider body" not in caplog.text
+
+
+def test_recognize_logs_safe_timeout_diagnostics(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    provider = DeepSeekReceiptAi("deepseek-key", client=TimeoutClient())
+
+    with pytest.raises(DeepSeekReceiptAiError):
+        asyncio.run(provider.recognize(b"receipt image"))
+
+    assert "deepseek_receipt_request_failed error_type=ReadTimeout" in caplog.text
+    assert "elapsed_ms=" in caplog.text
+    assert "deepseek-key" not in caplog.text
+    assert "receipt image" not in caplog.text

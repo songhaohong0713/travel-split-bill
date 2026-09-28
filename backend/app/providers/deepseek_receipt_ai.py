@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import httpx
@@ -65,15 +66,25 @@ class DeepSeekReceiptAi:
         }
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(timeout=30.0)
+        started_at = time.monotonic()
         try:
             response = await client.post(self.url, headers={"Authorization": f"Bearer {self.api_key}"}, json=payload)
         except httpx.HTTPError as exc:
+            logger.warning(
+                "deepseek_receipt_request_failed error_type=%s elapsed_ms=%s",
+                type(exc).__name__,
+                int((time.monotonic() - started_at) * 1000),
+            )
             raise DeepSeekReceiptAiError("DeepSeek request failed") from exc
         finally:
             if owns_client:
                 await client.aclose()
         if response.status_code != 200:
-            logger.warning("deepseek_receipt_request_rejected status=%s", response.status_code)
+            logger.warning(
+                "deepseek_receipt_request_rejected status=%s elapsed_ms=%s",
+                response.status_code,
+                int((time.monotonic() - started_at) * 1000),
+            )
             raise DeepSeekReceiptAiError("DeepSeek rejected receipt extraction")
         try:
             message = response.json()["choices"][0]["message"]["content"]
