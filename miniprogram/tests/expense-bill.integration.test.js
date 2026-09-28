@@ -95,6 +95,11 @@ test("checkout summary uses settlement currency when a rate is available", () =>
   assert.deepEqual(JSON.parse(JSON.stringify(helpers.checkoutSummary({ billTotal: "5000.00", currency: "JPY", settlementCurrency: "CNY", estimatedSettlementAmount: "212.95", actualPaymentAmount: "", actualPaymentCurrency: "" }))), { label: "预计结算", amount: "212.95", currency: "CNY" })
 })
 
+test("checkout summary prioritizes an actual payment", () => {
+  const { helpers } = loadExpensePage({})
+  assert.deepEqual(JSON.parse(JSON.stringify(helpers.checkoutSummary({ billTotal: "5000.00", currency: "JPY", settlementCurrency: "CNY", estimatedSettlementAmount: "212.95", actualPaymentAmount: "212", actualPaymentCurrency: "CNY" }))), { label: "实际支付", amount: "212", currency: "CNY" })
+})
+
 test("manual currency selection makes saved item amounts use JPY", () => {
   const { definition, helpers } = loadExpensePage({})
   const instance = pageInstance(definition, { currency: "CNY", settlementCurrency: "JPY", items: [{ id: "a", name: "晚餐", amount: "1200" }] })
@@ -169,18 +174,20 @@ test("validateBill rejects custom shares that are not 100 percent", () => {
 
 test("saveAndPreview persists then settles every expense in the trip", async () => {
   const calls = []
+  let redirected = ""
   const { definition } = loadExpensePage({
     createExpense() { calls.push("save"); return Promise.resolve({ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [{ item_id: "a", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }], adjustments: [] }] } }) },
     listExpenses() { calls.push("list"); return Promise.resolve([{ id: "expense-1", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-1", payer_id: "我", items: [{ item_id: "a", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }], adjustments: [] }] } }, { id: "expense-2", payload: { participants: ["我", "小王"], expenses: [{ expense_id: "expense-2", payer_id: "小王", items: [{ item_id: "b", amount: { amount: "10", currency: "CNY" }, allocation: { 小王: "1" } }], adjustments: [] }] } }]) },
     previewSettlement() { calls.push("preview"); return Promise.resolve({ transfers: [] }) },
     uploadReceipt() {}, getReceiptJob() {},
-  }, { navigateTo() {} })
+  }, { redirectTo({ url }) { redirected = url } })
   const instance = pageInstance(definition, {
     tripId: "trip-1", currency: "CNY", payer: "我", friend: "小王",
     items: [{ id: "a", name: "晚餐", amount: "20", allocationMode: "split", payerPercent: "50", friendPercent: "50", selected: false }],
   })
   await instance.saveAndPreview()
   assert.deepEqual(calls, ["save", "list", "preview"])
+  assert.match(redirected, /^\/pages\/settlement\/index\?tripId=trip-1/)
 })
 
 test("expense API deletes a trip and one expense", async () => {

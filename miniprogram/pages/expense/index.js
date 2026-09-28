@@ -279,7 +279,7 @@ Page({
         if (!tripPreview) throw new Error("请先统一每笔消费的两位同行人")
         return previewSettlement(this.data.tripId, tripPreview).then((result) => ({ result, tripPreview }))
       })
-      .then(({ result, tripPreview }) => wx.navigateTo({ url: settlementUrl(this.data.tripId, tripPreview, result) }))
+      .then(({ result, tripPreview }) => wx.redirectTo({ url: settlementUrl(this.data.tripId, tripPreview, result) }))
       .catch((error) => wx.showToast({ title: error.message || "保存账单失败", icon: "none" }))
       .finally(() => this.setData({ saving: false }))
   },
