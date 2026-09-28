@@ -262,6 +262,15 @@ test("actual payment removes an undefined prefix before accepting an iOS input d
   assert.equal(next.settlementCurrency, "JPY")
 })
 
+test("actual payment returns its normalized value to the native iOS input", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, { settlementCurrency: "JPY", actualPaymentCurrency: "" })
+  const value = instance.onActualPaymentAmount({ detail: { value: "undefined6" }, currentTarget: { dataset: { currency: "JPY" } } })
+  assert.equal(value, "6")
+  assert.equal(instance.data.actualPaymentAmount, "6")
+  assert.equal(instance.data.actualPaymentCurrency, "JPY")
+})
+
 test("invalid historical actual payment is cleared and never submitted", () => {
   const { helpers } = loadExpensePage({})
   const hydrated = helpers.hydrateExpense({
