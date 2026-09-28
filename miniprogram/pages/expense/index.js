@@ -149,11 +149,14 @@ Page({
   startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) },
   pollOcr(jobId) { getReceiptJob(jobId).then((job) => { const labels = { queued: "排队识别中", processing: "正在识别", failed: "识别失败，可手动录入" }; if (job.status === "needs_review") return this.applyOcrCandidates(job.candidates || []); this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: [] }); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }).catch(() => this.setData({ ocrStatus: "识别状态查询失败，可手动录入" })) },
   applyOcrCandidates(candidates) {
-    const recognized = (candidates || []).map((candidate) => ({ ...newItem(), name: String(candidate.translated_text || candidate.source_text || "").trim(), amount: String(candidate.amount || "").trim() })).filter((item) => item.name && Number.isFinite(cents(item.amount)) && cents(item.amount) > 0)
+    const recognized = (candidates || []).map((candidate) => ({ ...newItem(), name: String(candidate.translated_text || candidate.source_text || "").trim(), amount: String(candidate.amount || "").trim(), currency: String(candidate.currency || "").trim().toUpperCase() })).filter((item) => item.name && Number.isFinite(cents(item.amount)) && cents(item.amount) > 0)
     if (!recognized.length) return this.setData({ ocrCandidates: [], ocrStatus: "未识别到有效商品，请手动录入" })
     const starterIsBlank = this.data.items.length === 1 && !String(this.data.items[0].name || "").trim() && !String(this.data.items[0].amount || "").trim()
     const items = starterIsBlank ? recognized : [...this.data.items, ...recognized]
-    this.syncBill({ items, ocrCandidates: [], ocrStatus: `已自动添加 ${recognized.length} 项，请核对金额`, expandedItemId: recognized[0].id })
+    const currencies = [...new Set(recognized.map((item) => item.currency).filter((currency) => /^[A-Z]{3}$/.test(currency)))]
+    const currency = currencies.length === 1 ? currencies[0] : this.data.currency
+    const notice = currencies.length > 1 ? "；币种不一致，请手动确认" : ""
+    this.syncBill({ items, currency, ocrCandidates: [], ocrStatus: `已自动添加 ${recognized.length} 项，请核对金额${notice}`, expandedItemId: recognized[0].id })
   },
   toggleAdjustments() { this.setData({ showAdjustments: !this.data.showAdjustments }) },
   onTitle(e) { this.setData({ title: e.detail.value }) }, onOccurredAt(e) { this.setData({ occurredAt: e.detail.value }) }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.setData({ adjustmentType: Number(e.detail.value) }) },

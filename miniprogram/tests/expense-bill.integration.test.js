@@ -206,6 +206,34 @@ test("receipt recognition appends items without overwriting manual details", () 
   assert.equal(instance.data.items[1].name, "茶")
 })
 
+test("receipt recognition switches the expense currency when all items agree", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, {
+    currency: "CNY", items: [{ id: "blank", name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+
+  instance.applyOcrCandidates([{ source_text: "緑茶", translated_text: "绿茶", amount: "160", currency: "JPY" }])
+
+  assert.equal(instance.data.currency, "JPY")
+})
+
+test("receipt recognition keeps the selected currency for mixed currencies", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, {
+    currency: "CNY", items: [{ id: "blank", name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+
+  instance.applyOcrCandidates([
+    { source_text: "Tea", translated_text: "茶", amount: "10", currency: "JPY" },
+    { source_text: "Coffee", translated_text: "咖啡", amount: "10", currency: "USD" },
+  ])
+
+  assert.equal(instance.data.currency, "CNY")
+  assert.match(instance.data.ocrStatus, /币种不一致/)
+})
+
 test("expense page exposes receipt-book layout hooks", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /class="bill-summary"/)
