@@ -246,6 +246,14 @@ test("actual payment locks the expense settlement currency", () => {
   assert.equal(next.settlementCurrencyLocked, true)
 })
 
+test("actual payment ignores undefined-like input values", () => {
+  const { helpers } = loadExpensePage({})
+  const next = helpers.applyActualPayment({ settlementCurrency: "JPY" }, "undefined", "CNY")
+  assert.equal(next.actualPaymentAmount, "")
+  assert.equal(next.actualPaymentCurrency, "")
+  assert.equal(next.settlementCurrencyLocked, false)
+})
+
 test("invalid historical actual payment is cleared and never submitted", () => {
   const { helpers } = loadExpensePage({})
   const hydrated = helpers.hydrateExpense({

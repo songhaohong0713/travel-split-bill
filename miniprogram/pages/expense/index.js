@@ -29,7 +29,8 @@ function money(centsValue) {
 }
 
 function applyActualPayment(data, amount, currency) {
-  const actualPaymentAmount = String(amount ?? "").trim()
+  const rawActualPaymentAmount = String(amount ?? "").trim()
+  const actualPaymentAmount = /^(undefined|undefine|null)$/i.test(rawActualPaymentAmount) ? "" : rawActualPaymentAmount
   const actualPaymentCurrency = String(currency ?? "").trim().toUpperCase()
   if (!actualPaymentAmount) return { ...data, actualPaymentAmount: "", actualPaymentCurrency: "", settlementCurrencyLocked: false }
   const hasActualPayment = validPositiveAmount(actualPaymentAmount) && /^[A-Z]{3}$/.test(actualPaymentCurrency)
