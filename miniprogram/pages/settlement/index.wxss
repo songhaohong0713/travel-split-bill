@@ -28,3 +28,4 @@
 .expires { margin-top: 12rpx; }
 .copy-button { margin: 18rpx 0 0; padding: 0; color: #C86D45; background: transparent; font-size: 25rpx; text-align: left; }
 .copy-button::after { border: 0; }
+.settlement-sheet { background: #F6F4EC; }.settlement-summary { margin-bottom: 26rpx; padding: 28rpx; background: #FFFDF8; border: 2rpx solid #E2DBCF; border-radius: 24rpx; box-sizing: border-box; }.settlement-summary .transfer-list, .settlement-summary .settled-state { margin: 0; padding: 0; border: 0; border-radius: 0; }.settlement-summary .settled-state { background: #E8F0EB; }.publish-section, .share-section { border-radius: 18rpx; }.amount-value { color: #D06A42; }.publish-button { background: #124954; }

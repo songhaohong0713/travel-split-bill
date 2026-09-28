@@ -5,23 +5,25 @@
     <text class="subtitle">以下安排会尽量减少彼此之间的转账次数。</text>
   </view>
 
-  <block wx:if="{{transfers.length}}">
-    <view class="transfer-list">
-      <text class="list-label">建议转账</text>
-      <view wx:for="{{transfers}}" wx:key="from_participant_id" class="transfer-card">
-        <view class="transfer-route"><text class="person-name">{{item.from_participant_id}}</text><text class="route-arrow">转给</text><text class="person-name">{{item.to_participant_id}}</text></view>
-        <view class="transfer-amount"><text class="amount-currency">{{item.amount.currency}}</text><text class="amount-value">¥{{item.amount.amount}}</text></view>
+  <view class="settlement-summary">
+    <block wx:if="{{transfers.length}}">
+      <view class="transfer-list">
+        <text class="list-label">建议转账</text>
+        <view wx:for="{{transfers}}" wx:key="from_participant_id" class="transfer-card">
+          <view class="transfer-route"><text class="person-name">{{item.from_participant_id}}</text><text class="route-arrow">转给</text><text class="person-name">{{item.to_participant_id}}</text></view>
+          <view class="transfer-amount"><text class="amount-currency">{{item.amount.currency}}</text><text class="amount-value">¥{{item.amount.amount}}</text></view>
+        </view>
       </view>
+    </block>
+    <view wx:else class="settled-state">
+      <text class="settled-mark">✓</text>
+      <text class="settled-title">已经结清</text>
+      <text class="settled-copy">这笔账不需要额外转账。</text>
     </view>
-  </block>
-  <view wx:else class="settled-state">
-    <text class="settled-mark">✓</text>
-    <text class="settled-title">已经结清</text>
-    <text class="settled-copy">这笔账不需要额外转账。</text>
   </view>
 
   <view class="publish-section">
-    <text class="section-title">确认这份结算单</text>
+    <text class="section-title">确认并发布</text>
     <text class="section-note">发布后可生成一条分享链接，方便同行人查看。</text>
     <button class="publish-button" bindtap="publish" loading="{{publishing}}" disabled="{{published || publishing}}">{{published ? "已发布结算版本" : "发布结算版本"}}</button>
   </view>

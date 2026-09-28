@@ -290,6 +290,13 @@ test("expense page exposes compact item disclosure", () => {
   assert.match(wxml, /expandedItemId/)
 })
 
+test("settlement page keeps publishing and sharing in a distinct settlement sheet", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "settlement", "index.wxml"), "utf8")
+  assert.match(wxml, /class="settlement-summary"/)
+  assert.match(wxml, /确认并发布/)
+  assert.match(wxml, /创建并复制链接/)
+})
+
 test("expense page renders items as one dense ledger and exposes the subtotal", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /class="item-ledger"/)
