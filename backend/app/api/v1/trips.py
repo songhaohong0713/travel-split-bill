@@ -13,6 +13,7 @@ from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, TripMember, Us
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
+    CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
 
@@ -314,6 +315,13 @@ async def update_expense(
                 },
             )
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        except CloudBasePgRequestError as exc:
+            if "TSB_REVISION_CONFLICT" in str(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "REVISION_CONFLICT", "message": "消费记录已被更新"},
+                ) from exc
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict):
             raise _cloudbase_error(ValueError("invalid CloudBase update response"))

@@ -3,6 +3,7 @@ from collections.abc import Generator
 import pytest
 from app.api.v1.auth import create_access_token
 from app.main import app
+from app.providers.cloudbase_pg import CloudBasePgRequestError
 from fastapi.testclient import TestClient
 
 
@@ -51,4 +52,24 @@ def test_trips_use_cloudbase_rpc_for_mutation_and_table_api_for_reading(
     assert provider.rpc_calls[0][0] == "tsb_create_trip"
     assert listed.status_code == 200
     assert provider.rpc_calls[1] == ("tsb_list_member_trips", {"p_user_id": "owner-1"})
+
+
+def test_cloudbase_expense_revision_conflict_returns_409(
+    client: tuple[TestClient, FakeCloudBasePg],
+) -> None:
+    test_client, provider = client
+
+    async def conflicting_rpc(name: str, payload: dict[str, object]) -> dict[str, object]:
+        provider.rpc_calls.append((name, payload))
+        raise CloudBasePgRequestError(400, "TSB_REVISION_CONFLICT")
+
+    provider.rpc = conflicting_rpc  # type: ignore[method-assign]
+    response = test_client.patch(
+        "/v1/trips/trip-1/expenses/expense-1",
+        headers=_headers(),
+        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "REVISION_CONFLICT"
 

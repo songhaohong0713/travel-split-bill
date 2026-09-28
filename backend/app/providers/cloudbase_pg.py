@@ -72,7 +72,8 @@ class CloudBasePgClient:
             raise CloudBasePgUnavailable("CloudBase PostgreSQL is unavailable")
         if response.is_error:
             raise CloudBasePgRequestError(
-                response.status_code, "CloudBase PostgreSQL request was rejected"
+                response.status_code,
+                response.text[:500] or "CloudBase PostgreSQL request was rejected",
             )
         if not response.content:
             return None
