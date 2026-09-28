@@ -246,6 +246,30 @@ test("actual payment locks the expense settlement currency", () => {
   assert.equal(next.settlementCurrencyLocked, true)
 })
 
+test("invalid historical actual payment is cleared and never submitted", () => {
+  const { helpers } = loadExpensePage({})
+  const hydrated = helpers.hydrateExpense({
+    id: "expense-1", revision: 1, occurred_at: "2026-09-28",
+    payload: {
+      participants: ["我", "卢"], settlement_currency: "JPY",
+      expenses: [{
+        expense_id: "bill-1", settlement_currency: "JPY", actual_payment: { amount: "undefine", currency: "JPY" },
+        items: [{ item_id: "item-1", name: "晚餐", amount: { amount: "100", currency: "JPY" }, allocation: { 我: "1" } }],
+      }],
+    },
+  })
+  assert.equal(hydrated.actualPaymentAmount, "")
+  assert.equal(hydrated.settlementCurrencyLocked, false)
+
+  const bill = {
+    payer: "我", friend: "卢", currency: "JPY", settlementCurrency: "JPY", referenceRate: "", actualPaymentAmount: "undefine", actualPaymentCurrency: "JPY",
+    items: [{ id: "item-1", name: "晚餐", amount: "100", allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0,
+  }
+  assert.match(helpers.validateBill(bill), /实际支付金额格式不正确/)
+  assert.equal(helpers.buildBillPayload(bill).expenses[0].actual_payment, undefined)
+})
+
 test("bill summary counts selected items and includes adjustments", () => {
   const { helpers } = loadExpensePage({})
   const items = [

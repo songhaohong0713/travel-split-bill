@@ -6,6 +6,7 @@ Page({
     currencies: ["CNY", "JPY", "USD", "KRW"],
     currency: "CNY",
     trips: [],
+    hasLoaded: false,
     loadingTrips: true,
     loadError: "",
     showCreateForm: false,
@@ -14,7 +15,12 @@ Page({
   onLoad() {
     return login()
       .then(() => this.loadTrips())
+      .then(() => this.setData({ hasLoaded: true }))
       .catch(() => this.setData({ loadingTrips: false, loadError: "登录未完成，仍可新建旅行" }))
+  },
+  onShow() {
+    if (this.data.hasLoaded) return this.loadTrips()
+    return Promise.resolve()
   },
   loadTrips() {
     return listTrips()

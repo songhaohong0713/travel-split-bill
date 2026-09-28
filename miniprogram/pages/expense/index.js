@@ -19,15 +19,21 @@ function cents(value) {
   return Number(whole) * 100 + Number((fraction + "00").slice(0, 2)) * (whole.startsWith("-") ? -1 : 1)
 }
 
+function validPositiveAmount(value) {
+  const valueInCents = cents(value)
+  return Number.isFinite(valueInCents) && valueInCents > 0
+}
+
 function money(centsValue) {
   return (centsValue / 100).toFixed(2)
 }
 
 function applyActualPayment(data, amount, currency) {
-  const actualPaymentAmount = String(amount || "").trim()
-  const actualPaymentCurrency = String(currency || "").trim().toUpperCase()
+  const actualPaymentAmount = String(amount ?? "").trim()
+  const actualPaymentCurrency = String(currency ?? "").trim().toUpperCase()
   if (!actualPaymentAmount) return { ...data, actualPaymentAmount: "", actualPaymentCurrency: "", settlementCurrencyLocked: false }
-  return { ...data, actualPaymentAmount, actualPaymentCurrency, settlementCurrency: actualPaymentCurrency, settlementCurrencyLocked: true }
+  const hasActualPayment = validPositiveAmount(actualPaymentAmount) && /^[A-Z]{3}$/.test(actualPaymentCurrency)
+  return { ...data, actualPaymentAmount, actualPaymentCurrency, settlementCurrency: hasActualPayment ? actualPaymentCurrency : data.settlementCurrency, settlementCurrencyLocked: hasActualPayment }
 }
 
 function selectedItemCount(items) {
@@ -49,6 +55,9 @@ function hydrateExpense(record) {
   const payload = record.payload || {}
   const bill = (payload.expenses || [])[0] || {}
   const [payer = "我", friend = ""] = payload.participants || []
+  const actualPayment = bill.actual_payment && validPositiveAmount(bill.actual_payment.amount) && /^[A-Z]{3}$/.test(String(bill.actual_payment.currency || ""))
+    ? bill.actual_payment
+    : null
   return {
     expenseId: record.id,
     revision: record.revision,
@@ -58,9 +67,9 @@ function hydrateExpense(record) {
     friend,
     currency: bill.items && bill.items[0] && bill.items[0].amount && bill.items[0].amount.currency || payload.settlement_currency || "CNY",
     settlementCurrency: bill.settlement_currency || payload.settlement_currency || "CNY",
-    settlementCurrencyLocked: Boolean(bill.actual_payment),
-    actualPaymentAmount: bill.actual_payment && bill.actual_payment.amount || "",
-    actualPaymentCurrency: bill.actual_payment && bill.actual_payment.currency || "",
+    settlementCurrencyLocked: Boolean(actualPayment),
+    actualPaymentAmount: actualPayment && actualPayment.amount || "",
+    actualPaymentCurrency: actualPayment && actualPayment.currency || "",
     referenceRate: bill.reference_rate || "",
     referenceRateSource: bill.reference_rate_source || "",
     expensePayloadId: bill.expense_id || `bill-${record.id}`,
@@ -107,7 +116,8 @@ function validateBill(data) {
   }
   if (data.taxAmount && (!Number.isFinite(cents(data.taxAmount)) || cents(data.taxAmount) < 0)) return "税额不能为负数"
   if (data.adjustmentAmount && !Number.isFinite(cents(data.adjustmentAmount))) return "优惠或退款金额格式不正确"
-  if (data.currency !== data.settlementCurrency && !data.actualPaymentAmount && !(Number(data.referenceRate) > 0)) return "请先补充本笔消费的汇率"
+  if (data.actualPaymentAmount && !validPositiveAmount(data.actualPaymentAmount)) return "实际支付金额格式不正确"
+  if (data.currency !== data.settlementCurrency && !validPositiveAmount(data.actualPaymentAmount) && !(Number(data.referenceRate) > 0)) return "请先补充本笔消费的汇率"
   return ""
 }
 
@@ -131,6 +141,7 @@ function buildBillPayload(data) {
   let paidCents = items.reduce((total, item) => total + cents(item.amount.amount), 0)
   if (data.taxAmount && !data.taxIncluded) paidCents += cents(data.taxAmount)
   if (data.adjustmentAmount) paidCents += cents(data.adjustmentAmount)
+  const hasActualPayment = validPositiveAmount(data.actualPaymentAmount)
   return {
     title: data.title || defaultExpenseTitle(),
     participants: friend ? [payer, friend] : [payer],
@@ -141,9 +152,9 @@ function buildBillPayload(data) {
       items,
       adjustments: adjustment,
       settlement_currency: data.settlementCurrency || data.currency,
-      reference_rate: data.actualPaymentAmount ? undefined : data.referenceRate || undefined,
-      reference_rate_source: data.actualPaymentAmount ? undefined : data.referenceRateSource || undefined,
-      actual_payment: data.actualPaymentAmount ? { currency: data.actualPaymentCurrency, amount: data.actualPaymentAmount } : undefined,
+      reference_rate: hasActualPayment ? undefined : data.referenceRate || undefined,
+      reference_rate_source: hasActualPayment ? undefined : data.referenceRateSource || undefined,
+      actual_payment: hasActualPayment ? { currency: data.actualPaymentCurrency, amount: data.actualPaymentAmount } : undefined,
     }],
   }
 }
@@ -157,7 +168,7 @@ Page({
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
     const nextBillTotal = billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount)
-    this.setData({ ...changes, settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing && next.friend), billTotal: nextBillTotal, estimatedSettlementAmount: next.actualPaymentAmount ? "" : estimatedSettlementAmount(nextBillTotal, next.referenceRate) })
+    this.setData({ ...changes, settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing && next.friend), billTotal: nextBillTotal, estimatedSettlementAmount: validPositiveAmount(next.actualPaymentAmount) ? "" : estimatedSettlementAmount(nextBillTotal, next.referenceRate) })
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
@@ -191,7 +202,7 @@ Page({
   },
   refreshRate() {
     const { actualPaymentAmount, currency, occurredAt, settlementCurrency } = this.data
-    if (actualPaymentAmount) return Promise.resolve()
+    if (validPositiveAmount(actualPaymentAmount)) return Promise.resolve()
     if (currency === settlementCurrency) return Promise.resolve(this.syncBill({ referenceRate: "1", referenceRateSource: "same-currency", rateEffectiveDate: occurredAt, rateStatus: "无需换算" }))
     if (typeof getExchangeRate !== "function") return Promise.resolve()
     this.syncBill({ rateStatus: "正在查询汇率" })
@@ -245,4 +256,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { allocationFor, applyActualPayment, billTotal, buildBillPayload, buildTripPreview, defaultExpenseTitle, estimatedSettlementAmount, hydrateExpense, selectedItemCount, validateBill }
+if (typeof module !== "undefined") module.exports = { allocationFor, applyActualPayment, billTotal, buildBillPayload, buildTripPreview, defaultExpenseTitle, estimatedSettlementAmount, hydrateExpense, selectedItemCount, validPositiveAmount, validateBill }

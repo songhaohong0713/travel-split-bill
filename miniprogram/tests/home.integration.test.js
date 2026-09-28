@@ -68,6 +68,22 @@ test("home loads trips after login and opens a selected trip", async () => {
   assert.match(calls[0].url, /currency=JPY/)
 })
 
+test("home refreshes the trip list when returning from a deleted trip", async () => {
+  let trips = [{ id: "trip-1", name: "东京周末", default_currency: "JPY" }]
+  const { definition } = loadHomePage({
+    login: () => Promise.resolve(),
+    listTrips: () => Promise.resolve(trips),
+    createTrip() {},
+  })
+  const page = pageInstance(definition)
+
+  await page.onLoad()
+  trips = []
+  await page.onShow()
+
+  assert.deepEqual(JSON.parse(JSON.stringify(page.data.trips)), [])
+})
+
 test("home exposes travel-stub layout hooks", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.wxml"), "utf8")
   assert.match(wxml, /class="travel-stub"/)
