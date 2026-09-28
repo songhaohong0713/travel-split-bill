@@ -30,7 +30,7 @@ function money(centsValue) {
 
 function applyActualPayment(data, amount, currency) {
   const rawActualPaymentAmount = String(amount ?? "").trim()
-  const actualPaymentAmount = /^(undefined|undefine|null)$/i.test(rawActualPaymentAmount) ? "" : rawActualPaymentAmount
+  const actualPaymentAmount = rawActualPaymentAmount.replace(/^(?:undefined|undefine|null)+/i, "")
   const actualPaymentCurrency = String(currency ?? "").trim().toUpperCase()
   if (!actualPaymentAmount) return { ...data, actualPaymentAmount: "", actualPaymentCurrency: "", settlementCurrencyLocked: false }
   const hasActualPayment = validPositiveAmount(actualPaymentAmount) && /^[A-Z]{3}$/.test(actualPaymentCurrency)
@@ -214,7 +214,7 @@ Page({
   toggleAdjustments() { this.setData({ showAdjustments: !this.data.showAdjustments }) },
   onTitle(e) { this.setData({ title: e.detail.value }) }, onOccurredAt(e) { this.setData({ occurredAt: e.detail.value }); return this.refreshRate() }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.setData({ adjustmentType: Number(e.detail.value) }) },
   onSettlementCurrency(e) { if (this.data.settlementCurrencyLocked) return; this.syncBill({ settlementCurrency: this.data.settlementCurrencies[Number(e.detail.value)] }); return this.refreshRate() },
-  onActualPaymentAmount(e) { this.syncBill(applyActualPayment(this.data, e.detail.value, this.data.actualPaymentCurrency || this.data.settlementCurrency)); return this.refreshRate() },
+  onActualPaymentAmount(e) { this.syncBill(applyActualPayment(this.data, e.detail.value, e.currentTarget.dataset.currency || this.data.actualPaymentCurrency || this.data.settlementCurrency)); return this.refreshRate() },
   onActualPaymentCurrency(e) { this.syncBill(applyActualPayment(this.data, this.data.actualPaymentAmount, this.data.settlementCurrencies[Number(e.detail.value)])) },
   onManualRate(e) { this.syncBill({ referenceRate: e.detail.value, referenceRateSource: "manual", rateEffectiveDate: this.data.occurredAt, rateStatus: "已手动填写" }) },
   updateItem(id, field, value) { this.syncBill({ items: this.data.items.map((item) => item.id === id ? { ...item, [field]: value } : item) }) },

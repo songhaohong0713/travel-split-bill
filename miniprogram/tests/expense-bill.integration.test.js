@@ -254,6 +254,14 @@ test("actual payment ignores undefined-like input values", () => {
   assert.equal(next.settlementCurrencyLocked, false)
 })
 
+test("actual payment removes an undefined prefix before accepting an iOS input digit", () => {
+  const { helpers } = loadExpensePage({})
+  const next = helpers.applyActualPayment({ settlementCurrency: "JPY" }, "undefined1", "JPY")
+  assert.equal(next.actualPaymentAmount, "1")
+  assert.equal(next.actualPaymentCurrency, "JPY")
+  assert.equal(next.settlementCurrency, "JPY")
+})
+
 test("invalid historical actual payment is cleared and never submitted", () => {
   const { helpers } = loadExpensePage({})
   const hydrated = helpers.hydrateExpense({
@@ -390,6 +398,12 @@ test("refund adjustment accepts a negative amount on iOS", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/)
   assert.doesNotMatch(wxml, /type="digit" placeholder="负数，例如 -20"/)
+})
+
+test("actual payment input binds an empty fallback and the displayed currency", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /value="{{actualPaymentAmount \|\| ''}}"/)
+  assert.match(wxml, /data-currency="{{settlementCurrency}}"/)
 })
 
 test("expense page exposes compact item disclosure", () => {
