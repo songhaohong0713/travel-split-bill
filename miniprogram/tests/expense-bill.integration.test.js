@@ -87,6 +87,12 @@ test("buildBillPayload keeps per-item allocations", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.expenses[0].items.map((item) => item.allocation))), [
     { "我": "0.5", "小王": "0.5" }, { "小王": "1" },
   ])
+  assert.deepEqual(JSON.parse(JSON.stringify(result.expenses[0].items.map((item) => item.name))), ["晚餐", "甜点"])
+})
+
+test("checkout summary uses settlement currency when a rate is available", () => {
+  const { helpers } = loadExpensePage({})
+  assert.deepEqual(JSON.parse(JSON.stringify(helpers.checkoutSummary({ billTotal: "5000.00", currency: "JPY", settlementCurrency: "CNY", estimatedSettlementAmount: "212.95", actualPaymentAmount: "", actualPaymentCurrency: "" }))), { label: "预计结算", amount: "212.95", currency: "CNY" })
 })
 
 test("manual currency selection makes saved item amounts use JPY", () => {

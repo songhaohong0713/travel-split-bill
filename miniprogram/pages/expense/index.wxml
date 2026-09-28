@@ -64,7 +64,7 @@
     <input class="quiet-input adjustment-input" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
   </view></view>
   <view class="checkout-bar">
-    <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
+    <view><text class="checkout-label">{{checkoutLabel}}</text><text class="checkout-total">¥{{checkoutAmount}}</text><text class="checkout-currency">{{checkoutCurrency}}</text></view>
     <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">保存并查看分账</button>
   </view>
   </view>
