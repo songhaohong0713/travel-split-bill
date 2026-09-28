@@ -173,6 +173,12 @@ test("expense page uses a compact inline toolbar for batch allocation", () => {
   assert.match(wxml, /已选 {{selectedCount}} 项/)
 })
 
+test("batch editing uses compact checkboxes instead of item switches", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /<checkbox wx:if="{{batchEditing}}"/)
+  assert.doesNotMatch(wxml, /<switch wx:if="{{batchEditing}}"/)
+})
+
 test("buildBillPayload applies a bill tax only once", () => {
   const { helpers } = loadExpensePage({})
   const result = helpers.buildBillPayload({
