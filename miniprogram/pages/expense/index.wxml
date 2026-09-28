@@ -37,6 +37,12 @@
     </view></view>
     <button class="add-ticket" bindtap="addItem">+ 手动添加商品</button>
     <view class="expense-subtotal"><text>本次消费小计</text><view><text class="subtotal-value">¥{{billTotal}}</text><text class="subtotal-currency">{{currency}}</text></view></view>
+    <view class="expense-settlement">
+      <view class="settlement-row"><view><text class="section-title">本笔结算</text><text class="settlement-copy">一张小票使用一条结算规则</text></view><picker wx:if="{{!settlementCurrencyLocked}}" range="{{settlementCurrencies}}" value="{{settlementCurrencyIndex}}" bindchange="onSettlementCurrency"><view class="settlement-picker">{{settlementCurrency}} ⌄</view></picker><text wx:else class="settlement-locked">{{settlementCurrency}} 已锁定</text></view>
+      <view class="rate-summary"><text wx:if="{{actualPaymentAmount}}">按实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}} 结算</text><text wx:elif="{{currency === settlementCurrency}}">原币种与结算币种相同</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}} · {{rateEffectiveDate}}</text><text wx:else>未获取汇率</text></view>
+      <view class="payment-row"><text class="field-label">实际支付金额（可选）</text><input class="payment-input" type="digit" placeholder="例如 140.82" value="{{actualPaymentAmount}}" bindinput="onActualPaymentAmount"/><picker range="{{settlementCurrencies}}" value="{{actualPaymentCurrencyIndex}}" bindchange="onActualPaymentCurrency"><view class="payment-currency">{{actualPaymentCurrency || settlementCurrency}} ⌄</view></picker></view>
+      <view wx:if="{{rateStatus === 'failed'}}" class="rate-failed"><text>未获取汇率，请重新查询或手动填写</text><button size="mini" class="rate-retry" bindtap="refreshRate">重新查询</button><input class="manual-rate" type="digit" placeholder="手动填写 1 {{currency}} 等于多少 {{settlementCurrency}}" value="{{referenceRate}}" bindinput="onManualRate"/></view>
+    </view>
   </view>
   <view class="adjustment-section">
     <view class="list-heading" bindtap="toggleAdjustments"><text class="section-title">账单调整</text><text class="summary-note">{{showAdjustments ? "收起" : "可选"}}</text></view><view wx:if="{{showAdjustments}}">

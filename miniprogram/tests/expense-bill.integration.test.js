@@ -192,6 +192,24 @@ test("buildBillPayload applies a bill tax only once", () => {
   assert.equal(result.expenses[0].items.find((item) => item.tax_amount).tax_amount.amount, "2.00")
 })
 
+test("expense payload saves a selected settlement currency and historical rate", () => {
+  const { helpers } = loadExpensePage({})
+  const payload = helpers.buildBillPayload({
+    tripId: "trip-1", title: "便利店", currency: "JPY", settlementCurrency: "CNY", referenceRate: "0.04762", referenceRateSource: "frankfurter", payer: "我", friend: "小王", items: [{ id: "tea", name: "茶", amount: "1000", allocationMode: "split", payerPercent: "50", friendPercent: "50" }], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0,
+  })
+  assert.equal(payload.expenses[0].settlement_currency, "CNY")
+  assert.equal(payload.expenses[0].reference_rate, "0.04762")
+  assert.equal(payload.expenses[0].reference_rate_source, "frankfurter")
+  assert.equal(payload.expenses[0].actual_payment, undefined)
+})
+
+test("actual payment locks the expense settlement currency", () => {
+  const { helpers } = loadExpensePage({})
+  const next = helpers.applyActualPayment({ settlementCurrency: "JPY" }, "140.82", "CNY")
+  assert.equal(next.settlementCurrency, "CNY")
+  assert.equal(next.settlementCurrencyLocked, true)
+})
+
 test("bill summary counts selected items and includes adjustments", () => {
   const { helpers } = loadExpensePage({})
   const items = [
@@ -319,6 +337,19 @@ test("expense page renders items as one dense ledger and exposes the subtotal", 
   assert.match(wxml, /class="ledger-row"/)
   assert.match(wxml, /本次消费小计/)
   assert.match(wxml, /toggleBatchEditing/)
+})
+
+test("settlement page renders a transfer section per currency", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "settlement", "index.wxml"), "utf8")
+  assert.match(wxml, /wx:for="{{currencyGroups}}"/)
+  assert.match(wxml, /{{item.currency}} 结算/)
+})
+
+test("expense page shows settlement currency and rate after the subtotal", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /class="expense-subtotal"[\s\S]*class="expense-settlement"/)
+  assert.match(wxml, /实际支付金额（可选）/)
+  assert.match(wxml, /重新查询/)
 })
 
 test("expanded item editor stops row toggle events from swallowing input taps", () => {

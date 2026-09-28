@@ -44,6 +44,7 @@ class Expense:
     payment_to_settlement_rate: str | None = None
     payment_to_settlement_rate_source: str | None = None
     rounding_owner_id: str | None = None
+    settlement_currency: str | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,27 @@ def calculate_settlement(data: CalculateSettlementInput) -> SettlementResult:
         transfers=_minimum_transfers(net, settlement_currency),
         audit_lines=tuple(audit_lines),
     )
+
+
+def calculate_grouped_settlement(
+    participants: tuple[str, ...], expenses: tuple[Expense, ...]
+) -> dict[str, SettlementResult]:
+    groups: dict[str, list[Expense]] = {}
+    for expense in expenses:
+        if not expense.items:
+            raise ValueError("expense must include at least one item")
+        currency = expense.settlement_currency or expense.items[0].amount.currency
+        groups.setdefault(currency, []).append(expense)
+    return {
+        currency: calculate_settlement(
+            CalculateSettlementInput(
+                settlement_currency=currency,
+                participants=participants,
+                expenses=tuple(group),
+            )
+        )
+        for currency, group in sorted(groups.items())
+    }
 
 
 def _calculate_expense(

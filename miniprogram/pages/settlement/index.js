@@ -10,12 +10,19 @@ function publicShareUrl(token) {
   return `${baseUrl.replace(/\/$/, "")}/public/share/${token}`
 }
 
+function currencyGroups(result) {
+  if (result && Array.isArray(result.groups)) return result.groups
+  const transfers = result && result.transfers || []
+  const currency = transfers[0] && transfers[0].amount && transfers[0].amount.currency || "CNY"
+  return [{ currency, transfers }]
+}
+
 Page({
-  data: { transfers: [], tripId: "", previewPayload: null, published: false, publishing: false, sharing: false, expiryIndex: 1, expiryDays: [1, 7, 30], shareUrl: "", shareExpiresAt: "" },
+  data: { transfers: [], currencyGroups: [], tripId: "", previewPayload: null, published: false, publishing: false, sharing: false, expiryIndex: 1, expiryDays: [1, 7, 30], shareUrl: "", shareExpiresAt: "" },
   onLoad(query) {
     const result = readJson(query.result, {})
     const previewPayload = readJson(query.preview, null)
-    this.setData({ tripId: query.tripId || "", previewPayload, transfers: result.transfers || [] })
+    this.setData({ tripId: query.tripId || "", previewPayload, transfers: result.transfers || [], currencyGroups: currencyGroups(result) })
   },
   onExpiryChange(e) { this.setData({ expiryIndex: Number(e.detail.value) }) },
   publish() {
@@ -25,7 +32,7 @@ Page({
     this.setData({ publishing: true })
     publishSettlement(tripId, previewPayload)
       .then((published) => {
-        this.setData({ published: true, transfers: published.result.transfers || this.data.transfers })
+        this.setData({ published: true, transfers: published.result.transfers || this.data.transfers, currencyGroups: currencyGroups(published.result) })
         wx.showToast({ title: "结算版本已发布", icon: "success" })
       })
       .catch((e) => wx.showToast({ title: e.message || "发布失败", icon: "none" }))
@@ -51,3 +58,5 @@ Page({
     wx.setClipboardData({ data: this.data.shareUrl, success: () => wx.showToast({ title: "链接已复制", icon: "success" }) })
   }
 })
+
+if (typeof module !== "undefined") module.exports = { currencyGroups }
