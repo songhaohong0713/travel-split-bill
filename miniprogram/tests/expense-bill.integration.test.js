@@ -104,6 +104,19 @@ test("expense helpers provide a dated title, hydrate a record, and combine a tri
   assert.equal(helpers.buildTripPreview([recordA, recordB], "CNY").expenses.length, 2)
 })
 
+test("expense page starts OCR for a receipt selected before navigation", async () => {
+  const { definition } = loadExpensePage({})
+  const instance = pageInstance(definition)
+  let receivedPath = ""
+  instance.startOcr = (filePath) => { receivedPath = filePath }
+
+  await instance.onLoad({ tripId: "trip-1", currency: "JPY", receiptPath: "wxfile://receipt.jpg" })
+
+  assert.equal(instance.data.receiptPath, "wxfile://receipt.jpg")
+  assert.equal(instance.data.ocrStatus, "等待上传识别")
+  assert.equal(receivedPath, "wxfile://receipt.jpg")
+})
+
 test("validateBill rejects custom shares that are not 100 percent", () => {
   const { helpers } = loadExpensePage({})
   assert.match(helpers.validateBill({ payer: "我", friend: "小王", items: [{ name: "餐费", amount: "20", allocationMode: "custom", payerPercent: "70", friendPercent: "20" }] }), /100%/)

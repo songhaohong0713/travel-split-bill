@@ -30,12 +30,16 @@ Page({
     const { id } = event.currentTarget.dataset
     wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(id)}` })
   },
-  createExpenseRecord() {
+  chooseReceiptAndCreate() {
+    if (this.data.creating) return Promise.resolve()
+    return new Promise((resolve) => wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => resolve(this.createExpenseRecord(tempFiles[0].tempFilePath)), fail: () => resolve() }))
+  },
+  createExpenseRecord(receiptPath = "") {
     if (this.data.creating) return Promise.resolve()
     const occurredAt = new Date().toISOString().slice(0, 10)
     this.setData({ creating: true })
     return createExpense(this.data.tripId, occurredAt, emptyPayload(defaultExpenseTitle(), this.data.currency))
-      .then((record) => wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(record.id)}` }))
+      .then((record) => wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(record.id)}${receiptPath ? `&receiptPath=${encodeURIComponent(receiptPath)}` : ""}` }))
       .catch((error) => wx.showToast({ title: error.message || "新建消费失败", icon: "none" }))
       .finally(() => this.setData({ creating: false }))
   },

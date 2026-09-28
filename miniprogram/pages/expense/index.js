@@ -135,8 +135,10 @@ Page({
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
-    this.syncBill({ tripId: q.tripId, currency: q.currency || "CNY", expenseId: q.expenseId || "", occurredAt, title: defaultExpenseTitle() })
-    return q.expenseId ? this.loadExpense(q.expenseId) : Promise.resolve()
+    const receiptPath = q.receiptPath || ""
+    this.syncBill({ tripId: q.tripId, currency: q.currency || "CNY", expenseId: q.expenseId || "", occurredAt, title: defaultExpenseTitle(), receiptPath, ocrStatus: receiptPath ? "等待上传识别" : "未上传" })
+    const loaded = q.expenseId ? this.loadExpense(q.expenseId) : Promise.resolve()
+    return loaded.then(() => { if (receiptPath) this.startOcr(receiptPath) })
   },
   loadExpense(expenseId) {
     return listExpenses(this.data.tripId).then((records) => {

@@ -40,7 +40,7 @@ test("trip detail lists saved expenses as compact summaries", async () => {
   assert.equal(page.data.expenses[0].total, "30.00")
 })
 
-test("trip detail creates a dated expense and opens its editor", async () => {
+test("trip detail creates a dated expense after choosing a receipt", async () => {
   let created
   let destination = ""
   const definition = loadTripDetail({
@@ -49,14 +49,25 @@ test("trip detail creates a dated expense and opens its editor", async () => {
       created = { occurredAt, payload }
       return Promise.resolve({ id: "expense-1" })
     },
-  }, { navigateTo({ url }) { destination = url } })
+  }, {
+    chooseMedia({ success }) { success({ tempFiles: [{ tempFilePath: "wxfile://receipt.jpg" }] }) },
+    navigateTo({ url }) { destination = url },
+  })
   const page = pageInstance(definition, { tripId: "trip-1", currency: "CNY" })
 
-  await page.createExpenseRecord()
+  await page.chooseReceiptAndCreate()
 
   assert.match(created.payload.title, /^\d+月\d+日消费$/)
   assert.equal(created.payload.expenses[0].items.length, 0)
   assert.match(destination, /expenseId=expense-1/)
+  assert.match(destination, /receiptPath=wxfile%3A%2F%2Freceipt.jpg/)
+})
+
+test("trip detail exposes compact expense summaries and a receipt-first action", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.wxml"), "utf8")
+  assert.match(wxml, /class="expense-summary"/)
+  assert.match(wxml, /class="expense-preview"/)
+  assert.match(wxml, /拍小票，记录消费/)
 })
 
 test("trip detail prepares a native share path after creating an invite", async () => {
