@@ -89,6 +89,16 @@ test("buildBillPayload keeps per-item allocations", () => {
   ])
 })
 
+test("manual currency selection makes saved item amounts use JPY", () => {
+  const { definition, helpers } = loadExpensePage({})
+  const instance = pageInstance(definition, { currency: "CNY", settlementCurrency: "JPY", items: [{ id: "a", name: "晚餐", amount: "1200" }] })
+
+  instance.onCurrency({ detail: { value: 1 } })
+
+  assert.equal(instance.data.currency, "JPY")
+  assert.equal(helpers.buildBillPayload({ ...instance.data, payer: "我", friend: "", taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0 }).expenses[0].items[0].amount.currency, "JPY")
+})
+
 test("expense helpers provide a dated title, hydrate a record, and combine a trip preview", () => {
   const { helpers } = loadExpensePage({})
   const recordA = {
@@ -397,6 +407,12 @@ test("expense page exposes receipt-book layout hooks", () => {
   assert.match(wxml, /class="bill-summary"/)
   assert.match(wxml, /class="batch-toolbar"/)
   assert.match(wxml, /class="checkout-bar"/)
+})
+
+test("expense page exposes manual currency selection and explicit save copy", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /bindchange="onCurrency"/)
+  assert.match(wxml, /保存并查看分账/)
 })
 
 test("settlement page exposes settlement-sheet layout hooks", () => {

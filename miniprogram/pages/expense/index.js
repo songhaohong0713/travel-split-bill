@@ -177,7 +177,7 @@ Page({
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
     const nextBillTotal = billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount)
-    this.setData({ ...changes, settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing && next.friend), billTotal: nextBillTotal, estimatedSettlementAmount: validPositiveAmount(next.actualPaymentAmount) ? "" : estimatedSettlementAmount(nextBillTotal, next.referenceRate) })
+    this.setData({ ...changes, currencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.currency)), settlementCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.settlementCurrency)), actualPaymentCurrencyIndex: Math.max(0, next.settlementCurrencies.indexOf(next.actualPaymentCurrency || next.settlementCurrency)), selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing && next.friend), billTotal: nextBillTotal, estimatedSettlementAmount: validPositiveAmount(next.actualPaymentAmount) ? "" : estimatedSettlementAmount(nextBillTotal, next.referenceRate) })
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
@@ -221,6 +221,7 @@ Page({
   },
   toggleAdjustments() { this.setData({ showAdjustments: !this.data.showAdjustments }) },
   onTitle(e) { this.setData({ title: e.detail.value }) }, onOccurredAt(e) { this.setData({ occurredAt: e.detail.value }); return this.refreshRate() }, onPayer(e) { this.setData({ payer: e.detail.value }) }, onFriend(e) { this.setData({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.setData({ adjustmentType: Number(e.detail.value) }) },
+  onCurrency(e) { this.syncBill({ currency: this.data.settlementCurrencies[Number(e.detail.value)] }); return this.refreshRate() },
   onSettlementCurrency(e) { if (this.data.settlementCurrencyLocked) return; this.syncBill({ settlementCurrency: this.data.settlementCurrencies[Number(e.detail.value)] }); return this.refreshRate() },
   onActualPaymentAmount(e) {
     const next = applyActualPayment(this.data, e.detail.value, e.currentTarget.dataset.currency || this.data.actualPaymentCurrency || this.data.settlementCurrency)

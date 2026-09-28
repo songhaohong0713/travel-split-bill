@@ -18,6 +18,7 @@
   </view>
   <view class="ticket-list">
     <view class="list-heading"><text class="section-title">商品条目</text><view class="list-actions"><text class="summary-note">共 {{items.length}} 项</text><text class="batch-toggle" bindtap="toggleBatchEditing">{{batchEditing ? "完成批量编辑" : "批量编辑"}}</text></view></view>
+    <view class="expense-currency-row"><text class="field-label">消费币种</text><picker range="{{settlementCurrencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><view class="expense-currency-picker">{{currency}}<text>⌄</text></view></picker></view>
     <view wx:if="{{showBatchTools && friend}}" class="batch-toolbar">
       <view class="batch-toolbar-heading"><text>已选 {{selectedCount}} 项</text><text class="batch-finish" bindtap="toggleBatchEditing">完成</text></view>
       <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-toolbar-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
@@ -55,6 +56,6 @@
   </view></view>
   <view class="checkout-bar">
     <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
-    <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">查看分账</button>
+    <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">保存并查看分账</button>
   </view>
 </view>

@@ -19,6 +19,8 @@
 .text-button { margin: 16rpx 0 0; padding: 0; color: #C86D45; background: transparent; font-size: 25rpx; text-align: left; }
 .text-button::after, .add-ticket::after, .remove-button::after { border: 0; }
 .ticket-list { padding-bottom: 18rpx; }
+.expense-currency-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14rpx; padding: 14rpx 2rpx; border-top: 2rpx solid #E5DED4; }
+.expense-currency-picker { padding: 8rpx 12rpx; color: #124954; background: #FFFDF8; border: 1rpx solid #9DB9AA; border-radius: 10rpx; font-size: 23rpx; }
 .ticket-card { padding: 18rpx 4rpx; border-top: 2rpx solid #E5DED4; }.ticket-card:first-of-type { margin-top: 12rpx; }.ticket-card.is-selected { background: #EDF5EF; }
 .compact-item-row { display: flex; align-items: center; gap: 12rpx; }.compact-item-name { flex: 1; overflow: hidden; font-size: 29rpx; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.compact-item-amount { color: #C86D45; font-size: 30rpx; font-weight: 700; }.compact-item-meta { display: flex; justify-content: space-between; margin: 8rpx 0 0 62rpx; color: #66767A; font-size: 22rpx; }.item-editor { margin: 16rpx 0 0 62rpx; padding-top: 14rpx; border-top: 2rpx dashed #D9D2C6; }
 .select-mark { display: flex; align-items: center; gap: 10rpx; color: #66767A; font-size: 23rpx; }

@@ -63,9 +63,11 @@ test("home loads trips after login and opens a selected trip", async () => {
   await page.onLoad()
 
   assert.equal(page.data.trips[0].name, "东京周末")
-  page.openTrip({ currentTarget: { dataset: { id: "trip-1", currency: "JPY" } } })
+  page.openTrip({ currentTarget: { dataset: { id: "trip-1", name: "%E4%B8%9C%E4%BA%AC%E5%91%A8%E6%9C%AB", currency: "JPY" } } })
   assert.match(calls[0].url, /tripId=trip-1/)
   assert.match(calls[0].url, /currency=JPY/)
+  assert.match(calls[0].url, /name=%E4%B8%9C%E4%BA%AC%E5%91%A8%E6%9C%AB/)
+  assert.doesNotMatch(calls[0].url, /%25E4/)
 })
 
 test("home refreshes the trip list when returning from a deleted trip", async () => {
