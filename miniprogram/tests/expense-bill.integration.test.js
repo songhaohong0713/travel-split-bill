@@ -386,6 +386,12 @@ test("expense page keeps optional tools collapsed by default", () => {
   assert.equal(definition.data.showBatchTools, false)
 })
 
+test("refund adjustment accepts a negative amount on iOS", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/)
+  assert.doesNotMatch(wxml, /type="digit" placeholder="负数，例如 -20"/)
+})
+
 test("expense page exposes compact item disclosure", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /toggleItemDetail/)

@@ -51,7 +51,7 @@
     <view class="adjustment-row"><view><text class="field-label">税额</text><text class="small-note">商品金额{{taxIncluded ? "已含税" : "未含税"}}</text></view><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#123E45"/></view>
     <input class="quiet-input adjustment-input" type="digit" placeholder="填写税额，例如 10" value="{{taxAmount}}" bindinput="onTax"/>
     <view class="adjustment-row"><text class="field-label">优惠 / 退款</text><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="inline-picker">{{adjustmentLabels[adjustmentType]}}⌄</view></picker></view>
-    <input class="quiet-input adjustment-input" type="digit" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
+    <input class="quiet-input adjustment-input" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
   </view></view>
   <view class="checkout-bar">
     <view><text class="checkout-label">本次应付</text><text class="checkout-total">¥{{billTotal}}</text></view>
