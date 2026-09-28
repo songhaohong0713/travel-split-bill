@@ -290,6 +290,14 @@ test("expense page exposes compact item disclosure", () => {
   assert.match(wxml, /expandedItemId/)
 })
 
+test("expense page renders items as one dense ledger and exposes the subtotal", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
+  assert.match(wxml, /class="item-ledger"/)
+  assert.match(wxml, /class="ledger-row"/)
+  assert.match(wxml, /本次消费小计/)
+  assert.match(wxml, /toggleBatchEditing/)
+})
+
 test("expanded item editor stops row toggle events from swallowing input taps", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /class="item-editor" catchtap="stopItemEditorTap"/)
