@@ -128,10 +128,10 @@ function settlementUrl(tripId, preview, result) {
 }
 
 Page({
-  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", showBatchTools: false, showAdjustments: false, expandedItemId: "" },
+  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", items: [newItem()], payer: "我", friend: "", batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", batchEditing: false, showBatchTools: false, showAdjustments: false, expandedItemId: "" },
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
-    this.setData({ ...changes, selectedCount: selectedItemCount(next.items), showBatchTools: selectedItemCount(next.items) > 0, billTotal: billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount) })
+    this.setData({ ...changes, selectedCount: selectedItemCount(next.items), showBatchTools: Boolean(next.batchEditing), billTotal: billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount) })
   },
   onLoad(q) {
     const occurredAt = new Date().toISOString().slice(0, 10)
@@ -167,6 +167,7 @@ Page({
   onItemMode(e) { const modes = ["payer", "friend", "split", "custom"]; this.updateItem(e.currentTarget.dataset.id, "allocationMode", modes[Number(e.detail.value)]) },
   onItemPayerPercent(e) { this.updateItem(e.currentTarget.dataset.id, "payerPercent", e.detail.value) }, onItemFriendPercent(e) { this.updateItem(e.currentTarget.dataset.id, "friendPercent", e.detail.value) },
   toggleItem(e) { const id = e.currentTarget.dataset.id; this.updateItem(id, "selected", !this.data.items.find((item) => item.id === id).selected) },
+  toggleBatchEditing() { const batchEditing = !this.data.batchEditing; this.syncBill({ batchEditing, items: this.data.items.map((item) => ({ ...item, selected: batchEditing ? item.selected : false })) }) },
   toggleItemDetail(e) { const id = e.currentTarget.dataset.id; this.setData({ expandedItemId: this.data.expandedItemId === id ? "" : id }) },
   stopItemEditorTap() {},
   addItem() { this.syncBill({ items: [...this.data.items, newItem()] }) },

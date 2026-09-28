@@ -152,6 +152,17 @@ test("batch allocation changes only selected items", () => {
   assert.equal(instance.data.items[1].allocationMode, "friend")
 })
 
+test("batch selection stays hidden until explicit batch editing begins", () => {
+  const { definition } = loadExpensePage({}, { showToast() {} })
+  const instance = pageInstance(definition, { items: [{ id: "a", selected: true, amount: "20" }] })
+
+  assert.equal(instance.data.batchEditing, false)
+  assert.equal(instance.data.showBatchTools, false)
+  instance.toggleBatchEditing()
+  assert.equal(instance.data.batchEditing, true)
+  assert.equal(instance.data.showBatchTools, true)
+})
+
 test("buildBillPayload applies a bill tax only once", () => {
   const { helpers } = loadExpensePage({})
   const result = helpers.buildBillPayload({
