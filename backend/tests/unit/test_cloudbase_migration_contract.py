@@ -39,3 +39,11 @@ def test_receipt_job_membership_increment_allows_trip_members():
     sql = Path("infra/cloudbase/20260927_receipt_job_membership.sql").read_text(encoding="utf-8")
     assert "tsb_create_receipt_image" in sql
     assert "trip_members" in sql
+
+
+def test_trip_ledger_follow_up_defines_owner_delete_rpcs():
+    sql = Path("infra/cloudbase/20260928_trip_ledger_follow_up.sql").read_text(encoding="utf-8")
+    assert "FUNCTION public.tsb_delete_owner_expense" in sql
+    assert "FUNCTION public.tsb_delete_owner_trip" in sql
+    assert "owner_id=p_owner_id" in sql
+    assert "GRANT EXECUTE ON FUNCTION" in sql

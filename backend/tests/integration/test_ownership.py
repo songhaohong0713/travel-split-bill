@@ -150,3 +150,29 @@ def test_expense_update_rejects_stale_revision_and_other_owner(
     assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
     assert forbidden.status_code == 404
     assert forbidden.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_only_trip_owner_can_delete_expenses_and_trip(client: TestClient) -> None:
+    trip_id = create_trip(client, "owner-a")
+    created = client.post(
+        f"/v1/trips/{trip_id}/expenses",
+        headers={
+            **auth("owner-a"),
+            "Idempotency-Key": "e3ea5a6b-809d-40aa-b9b8-5507f97bfca1",
+        },
+        json={"occurred_at": "2026-09-28", "payload": {"note": "晚餐"}},
+    )
+    expense_id = created.json()["data"]["id"]
+
+    forbidden = client.delete(
+        f"/v1/trips/{trip_id}/expenses/{expense_id}", headers=auth("owner-b")
+    )
+    deleted_expense = client.delete(
+        f"/v1/trips/{trip_id}/expenses/{expense_id}", headers=auth("owner-a")
+    )
+    deleted_trip = client.delete(f"/v1/trips/{trip_id}", headers=auth("owner-a"))
+
+    assert forbidden.status_code == 404
+    assert deleted_expense.status_code == 204
+    assert deleted_trip.status_code == 204
+    assert client.get(f"/v1/trips/{trip_id}/expenses", headers=auth("owner-a")).status_code == 404

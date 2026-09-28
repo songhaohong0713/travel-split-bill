@@ -6,10 +6,21 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from app.api.dependencies import CurrentUser, DbSession
-from app.db.models import ExpenseRecord, IdempotencyRecord, Trip, TripMember, User
+from app.db.models import (
+    ExpenseRecord,
+    IdempotencyRecord,
+    ReceiptImage,
+    ReceiptJob,
+    SettlementVersion,
+    ShareLink,
+    Trip,
+    TripInvite,
+    TripMember,
+    User,
+)
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
@@ -61,6 +72,13 @@ def _cloudbase(request: Request) -> CloudBasePgClient | None:
 
 def require_trip_member(session: DbSession, trip_id: str, user_id: str) -> Trip:
     trip = session.scalar(select(Trip).join(TripMember).where(Trip.id == trip_id, TripMember.user_id == user_id))
+    if trip is None:
+        raise _not_found()
+    return trip
+
+
+def require_trip_owner(session: DbSession, trip_id: str, user_id: str) -> Trip:
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
     if trip is None:
         raise _not_found()
     return trip
@@ -380,3 +398,56 @@ async def update_expense(
             "payload": updated.payload_json,
         }
     }
+
+
+@router.delete("/trips/{trip_id}/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_expense(
+    trip_id: str, expense_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
+) -> Response:
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            result = await cloudbase.rpc(
+                "tsb_delete_owner_expense",
+                {"p_trip_id": trip_id, "p_expense_id": expense_id, "p_owner_id": user_id},
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable, CloudBasePgRequestError) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get("not_found"):
+            raise _not_found()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    require_trip_owner(session, trip_id, user_id)
+    result = session.execute(delete(ExpenseRecord).where(ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id))
+    if getattr(result, "rowcount", 0) != 1:
+        raise _not_found()
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/trips/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_trip(
+    trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
+) -> Response:
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            result = await cloudbase.rpc("tsb_delete_owner_trip", {"p_trip_id": trip_id, "p_owner_id": user_id})
+        except (CloudBasePgConfigurationError, CloudBasePgUnavailable, CloudBasePgRequestError) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get("not_found"):
+            raise _not_found()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    require_trip_owner(session, trip_id, user_id)
+    image_ids = select(ReceiptImage.id).where(ReceiptImage.trip_id == trip_id)
+    session.execute(delete(ReceiptJob).where(ReceiptJob.image_id.in_(image_ids)))
+    session.execute(delete(ReceiptImage).where(ReceiptImage.trip_id == trip_id))
+    session.execute(delete(ShareLink).where(ShareLink.trip_id == trip_id))
+    session.execute(delete(SettlementVersion).where(SettlementVersion.trip_id == trip_id))
+    session.execute(delete(TripInvite).where(TripInvite.trip_id == trip_id))
+    session.execute(delete(ExpenseRecord).where(ExpenseRecord.trip_id == trip_id))
+    session.execute(delete(TripMember).where(TripMember.trip_id == trip_id))
+    session.execute(delete(Trip).where(Trip.id == trip_id))
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

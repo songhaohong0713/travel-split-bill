@@ -16,6 +16,8 @@ class FakeCloudBasePg:
         self.rpc_calls.append((name, payload))
         if name == "tsb_list_member_trips":
             return [{"id": "trip-1", "name": "Tokyo", "default_currency": "JPY", "member_count": 2}]
+        if name.startswith("tsb_delete_owner_"):
+            return {"deleted": True}
         return {"id": payload["p_trip_id"], "name": payload["p_name"], "default_currency": payload["p_default_currency"]}
 
     async def request(
@@ -72,4 +74,19 @@ def test_cloudbase_expense_revision_conflict_returns_409(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "REVISION_CONFLICT"
+
+
+def test_cloudbase_owner_deletion_uses_delete_rpcs(
+    client: tuple[TestClient, FakeCloudBasePg],
+) -> None:
+    test_client, provider = client
+
+    expense = test_client.delete("/v1/trips/trip-1/expenses/expense-1", headers=_headers())
+    trip = test_client.delete("/v1/trips/trip-1", headers=_headers())
+
+    assert expense.status_code == trip.status_code == 204
+    assert provider.rpc_calls == [
+        ("tsb_delete_owner_expense", {"p_trip_id": "trip-1", "p_expense_id": "expense-1", "p_owner_id": "owner-1"}),
+        ("tsb_delete_owner_trip", {"p_trip_id": "trip-1", "p_owner_id": "owner-1"}),
+    ]
 
