@@ -1,4 +1,4 @@
-const { createExpense, createTripInvite, deleteExpense, deleteTrip, listExpenses } = require("../../services/api")
+const { createTripInvite, deleteExpense, deleteTrip, listExpenses } = require("../../services/api")
 
 function confirmDelete(content) {
   return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
@@ -12,12 +12,9 @@ function expenseSummary(record, currency) {
   const bill = (record.payload.expenses || [])[0] || {}
   const items = bill.items || []
   const total = items.reduce((sum, item) => sum + Math.round(Number(item.amount && item.amount.amount) * 100 || 0), 0)
-  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, total: (total / 100).toFixed(2), currency }
+  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, total: (total / 100).toFixed(2), currency, isCreator: Boolean(record.is_creator) }
 }
 
-function emptyPayload(title, currency) {
-  return { title, participants: ["我", ""], settlement_currency: currency, expenses: [{ expense_id: `bill-${Date.now()}`, payer_id: "我", items: [], adjustments: [] }] }
-}
 
 Page({
   data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
@@ -43,12 +40,10 @@ Page({
   },
   createExpenseRecord() {
     if (this.data.creating) return Promise.resolve()
-    const occurredAt = new Date().toISOString().slice(0, 10)
     this.setData({ creating: true })
-    return createExpense(this.data.tripId, occurredAt, emptyPayload(defaultExpenseTitle(), this.data.currency))
-      .then((record) => wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(record.id)}` }))
-      .catch((error) => wx.showToast({ title: error.message || "新建消费失败", icon: "none" }))
-      .finally(() => this.setData({ creating: false }))
+    wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}` })
+    this.setData({ creating: false })
+    return Promise.resolve()
   },
   prepareInvite() {
     if (this.data.inviting) return Promise.resolve()
@@ -59,8 +54,9 @@ Page({
       .finally(() => this.setData({ inviting: false }))
   },
   deleteExpenseRecord(event) {
-    if (!this.data.isOwner) return Promise.resolve()
     const { id } = event.currentTarget.dataset
+    const expense = this.data.expenses.find((item) => item.id === id)
+    if (!this.data.isOwner && !(expense && expense.isCreator)) return Promise.resolve()
     return confirmDelete("删除后无法恢复这笔消费记录。")
       .then((confirmed) => confirmed ? deleteExpense(this.data.tripId, id) : null)
       .then((result) => result === null ? null : this.loadExpenses())
@@ -78,4 +74,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { defaultExpenseTitle, expenseSummary, emptyPayload }
+if (typeof module !== "undefined") module.exports = { defaultExpenseTitle, expenseSummary }

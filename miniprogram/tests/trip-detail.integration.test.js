@@ -41,16 +41,11 @@ test("trip detail lists saved expenses as compact summaries", async () => {
   assert.equal(page.data.expenses[0].total, "30.00")
 })
 
-test("trip detail creates a dated expense after choosing a receipt", async () => {
-  let created
+test("trip detail opens a local draft after choosing a receipt without creating an expense", async () => {
   let destination = ""
   const app = { globalData: {} }
   const definition = loadTripDetail({
     listExpenses() { return Promise.resolve([]) },
-    createExpense(_tripId, occurredAt, payload) {
-      created = { occurredAt, payload }
-      return Promise.resolve({ id: "expense-1" })
-    },
   }, {
     chooseMedia({ success }) { success({ tempFiles: [{ tempFilePath: "wxfile://receipt.jpg" }] }) },
     compressImage({ success }) { success({ tempFilePath: "wxfile://compressed-receipt.jpg" }) },
@@ -60,9 +55,7 @@ test("trip detail creates a dated expense after choosing a receipt", async () =>
 
   await page.chooseReceiptAndCreate()
 
-  assert.match(created.payload.title, /^\d+月\d+日消费$/)
-  assert.equal(created.payload.expenses[0].items.length, 0)
-  assert.match(destination, /expenseId=expense-1/)
+  assert.doesNotMatch(destination, /expenseId=/)
   assert.doesNotMatch(destination, /receiptPath=/)
   assert.equal(app.globalData.pendingReceiptPath, "wxfile://compressed-receipt.jpg")
 })

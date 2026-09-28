@@ -13,6 +13,7 @@ from app.api.v1.trips import (
     _ensure_user,
     _not_found,
     require_trip_member,
+    require_trip_owner,
 )
 from app.db.models import Trip, TripInvite, TripMember
 from app.providers.cloudbase_pg import (
@@ -54,7 +55,7 @@ async def create_trip_invite(trip_id: str, http_request: Request, session: DbSes
         if result.get("full"):
             raise _full()
         return {"data": {"token": token, "expires_at": str(result["expires_at"])}}
-    require_trip_member(session, trip_id, user_id)
+    require_trip_owner(session, trip_id, user_id)
     if session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip_id)) >= 2:
         raise _full()
     now = _now()

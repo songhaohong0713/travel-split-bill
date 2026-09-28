@@ -173,12 +173,15 @@ async def list_expenses(
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
+            memberships = await cloudbase.rpc("tsb_list_member_trips", {"p_user_id": user_id})
+            if not isinstance(memberships, list) or not any(str(row.get("id", "")) == trip_id for row in memberships if isinstance(row, dict)):
+                raise _not_found()
             rows = await cloudbase.request(
                 "GET",
                 "/expenses",
                 params={
                     "trip_id": f"eq.{trip_id}",
-                    "select": "id,revision,occurred_at,payload_json",
+                    "select": "id,owner_id,revision,occurred_at,payload_json",
                     "order": "created_at.asc",
                 },
             )
@@ -194,12 +197,13 @@ async def list_expenses(
                     "revision": int(row["revision"]),
                     "occurred_at": str(row["occurred_at"]),
                     "payload": row["payload_json"],
+                    "is_creator": str(row.get("owner_id", "")) == user_id,
                 }
                 for row in typed_rows
             ]
         }
 
-    require_trip_member(session, trip_id, user_id)
+    trip = require_trip_member(session, trip_id, user_id)
     expenses = session.scalars(
         select(ExpenseRecord)
         .where(ExpenseRecord.trip_id == trip_id)
@@ -212,6 +216,7 @@ async def list_expenses(
                 "revision": expense.revision,
                 "occurred_at": expense.occurred_at.isoformat(),
                 "payload": expense.payload_json,
+                "is_creator": expense.owner_id == user_id,
             }
             for expense in expenses
         ]
@@ -271,7 +276,7 @@ async def create_expense(
         persisted = result.get("response", response)
         return JSONResponse(status_code=status.HTTP_201_CREATED, content=persisted)
 
-    require_trip_member(session, trip_id, user_id)
+    trip = require_trip_member(session, trip_id, user_id)
     existing = session.scalar(
         select(IdempotencyRecord).where(
             IdempotencyRecord.owner_id == user_id,
@@ -354,7 +359,7 @@ async def update_expense(
             }
         }
 
-    require_trip_member(session, trip_id, user_id)
+    trip = require_trip_member(session, trip_id, user_id)
     expense = session.scalar(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
@@ -362,6 +367,8 @@ async def update_expense(
         )
     )
     if expense is None:
+        raise _not_found()
+    if expense.owner_id != user_id and trip.owner_id != user_id:
         raise _not_found()
     result = session.execute(
         update(ExpenseRecord)
@@ -418,7 +425,10 @@ async def delete_expense(
             raise _not_found()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    require_trip_owner(session, trip_id, user_id)
+    trip = require_trip_member(session, trip_id, user_id)
+    expense = session.scalar(select(ExpenseRecord).where(ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id))
+    if expense is None or (expense.owner_id != user_id and trip.owner_id != user_id):
+        raise _not_found()
     result = session.execute(delete(ExpenseRecord).where(ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id))
     if getattr(result, "rowcount", 0) != 1:
         raise _not_found()
