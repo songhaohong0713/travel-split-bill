@@ -4,6 +4,16 @@
   <view wx:elif="{{loadError}}" class="state-card error"><text>{{loadError}}</text></view>
   <block wx:elif="{{expenses.length}}">
   <view class="trip-overview"><text class="overview-label">旅行总消费</text><view><text class="overview-total">¥{{overview.total}}</text><text class="overview-currency">{{overview.currency}}</text></view><text class="overview-note">已记录 {{overview.recordCount}} 笔消费</text><text wx:if="{{overview.mixedCurrency}}" class="overview-warning">含其他币种，未合并换算</text></view>
+  <view class="settlement-overview">
+    <view class="list-heading"><text class="section-title">旅行结算</text><text class="section-note">按已保存消费计算</text></view>
+    <text wx:if="{{settlementWarning}}" class="settlement-warning">{{settlementWarning}}</text>
+    <view wx:for="{{settlementGroups}}" wx:key="currency" class="settlement-group">
+      <text class="settlement-currency">{{item.currency}}</text>
+      <view class="settlement-head"><text>成员</text><text>实际支付</text><text>应承担</text></view>
+      <view wx:for="{{item.participants}}" wx:for-item="participant" wx:key="name" class="settlement-person"><text>{{participant.name}}</text><text>¥{{participant.paid}}</text><text>¥{{participant.responsibility}}</text></view>
+      <text class="transfer-result">{{item.transferText}}</text>
+    </view>
+  </view>
   <view class="expense-list">
     <view class="list-heading"><text class="section-title">消费记录</text><text class="section-note">共 {{expenses.length}} 笔</text></view>
     <view wx:for="{{expenses}}" wx:key="id" class="expense-summary" data-id="{{item.id}}" bindtap="openExpense">

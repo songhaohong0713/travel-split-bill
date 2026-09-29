@@ -53,6 +53,69 @@ test("trip detail derives a same-currency overview without mixing other currenci
   assert.equal(page.data.overview.mixedCurrency, true)
 })
 
+test("trip detail shows paid responsibility and pending transfer from settlement preview", async () => {
+  let previewPayload
+  const definition = loadTripDetail({
+    listExpenses: () => Promise.resolve([{
+      id: "expense-1", occurred_at: "2026-09-28",
+      payload: { participants: ["我", "卢"], expenses: [{ payer_id: "我", settlement_currency: "CNY", items: [{ item_id: "tea", amount: { amount: "100", currency: "CNY" }, allocation: { 我: "0.5", 卢: "0.5" } }] }] },
+    }]),
+    previewSettlement(tripId, payload) {
+      previewPayload = payload
+      return Promise.resolve({ groups: [{
+        currency: "CNY",
+        paid_by_participant: { 我: { amount: "100.00", currency: "CNY" }, 卢: { amount: "0.00", currency: "CNY" } },
+        responsibility_by_participant: { 我: { amount: "50.00", currency: "CNY" }, 卢: { amount: "50.00", currency: "CNY" } },
+        transfers: [{ from_participant_id: "卢", to_participant_id: "我", amount: { amount: "50.00", currency: "CNY" } }],
+      }] })
+    },
+  })
+  const page = pageInstance(definition)
+
+  await page.onLoad({ tripId: "trip-1", currency: "CNY" })
+
+  assert.equal(previewPayload.participants.join(","), "我,卢")
+  assert.deepEqual(JSON.parse(JSON.stringify(page.data.settlementGroups)), [{
+    currency: "CNY",
+    participants: [
+      { name: "我", paid: "100.00", responsibility: "50.00" },
+      { name: "卢", paid: "0.00", responsibility: "50.00" },
+    ],
+    transferText: "卢 需付给 我 ¥50.00 CNY",
+  }])
+  assert.equal(page.data.settlementWarning, "")
+})
+
+test("trip detail keeps expenses visible when settlement preview is incomplete", async () => {
+  const definition = loadTripDetail({
+    listExpenses: () => Promise.resolve([{
+      id: "expense-1", occurred_at: "2026-09-28",
+      payload: { participants: ["我", "卢"], expenses: [{ payer_id: "我", items: [{ item_id: "tea", amount: { amount: "100", currency: "JPY" }, allocation: { 我: "0.5", 卢: "0.5" } }] }] },
+    }]),
+    previewSettlement: () => Promise.reject({ message: "missing rate" }),
+  })
+  const page = pageInstance(definition)
+
+  await page.onLoad({ tripId: "trip-1", currency: "CNY" })
+
+  assert.equal(page.data.expenses.length, 1)
+  assert.equal(page.data.settlementGroups.length, 0)
+  assert.match(page.data.settlementWarning, /补全.*汇率/)
+})
+
+test("trip detail refreshes the overview after returning from a saved expense", async () => {
+  let loads = 0
+  const definition = loadTripDetail({
+    listExpenses() { loads += 1; return Promise.resolve([]) },
+  })
+  const page = pageInstance(definition)
+
+  await page.onLoad({ tripId: "trip-1", currency: "CNY" })
+  await page.onShow()
+
+  assert.equal(loads, 2)
+})
+
 test("trip detail opens a local draft after choosing a receipt without creating an expense", async () => {
   let destination = ""
   const app = { globalData: {} }
@@ -77,6 +140,9 @@ test("trip detail exposes compact expense summaries and a receipt-first action",
   assert.match(wxml, /class="expense-summary"/)
   assert.match(wxml, /class="expense-preview"/)
   assert.match(wxml, /拍小票，记录消费/)
+  assert.match(wxml, /旅行结算/)
+  assert.match(wxml, /实际支付/)
+  assert.match(wxml, /应承担/)
 })
 
 test("trip detail prepares a native share path after creating an invite", async () => {

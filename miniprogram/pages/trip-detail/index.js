@@ -1,4 +1,4 @@
-const { createTripInvite, deleteExpense, deleteTrip, listExpenses } = require("../../services/api")
+const { createTripInvite, deleteExpense, deleteTrip, listExpenses, previewSettlement } = require("../../services/api")
 
 function confirmDelete(content) {
   return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
@@ -23,15 +23,56 @@ function buildOverview(records, currency) {
   return { recordCount: records.length, total: (cents / 100).toFixed(2), currency, mixedCurrency: included.length !== summaries.length }
 }
 
+function validAmount(value) {
+  return /^\d+(\.\d{1,2})?$/.test(String(value || "").trim()) && Number(value) > 0
+}
+
+function buildSettlementPreview(records, currency) {
+  const participants = [...new Set(records.flatMap((record) => record.payload && record.payload.participants || []).map((name) => String(name || "").trim()).filter(Boolean))]
+  const expenses = records.flatMap((record) => record.payload && record.payload.expenses || [])
+    .filter((expense) => Array.isArray(expense.items) && expense.items.length)
+    .map((expense) => ({
+      ...expense,
+      actual_payment: expense.actual_payment && validAmount(expense.actual_payment.amount) ? expense.actual_payment : undefined,
+    }))
+  return participants.length && expenses.length ? { settlement_currency: currency, participants, expenses } : null
+}
+
+function settlementGroups(result, participants) {
+  const groups = result && Array.isArray(result.groups) ? result.groups : result ? [{ currency: ((result.transfers || [])[0] || {}).amount && result.transfers[0].amount.currency || "CNY", ...result }] : []
+  return groups.map((group) => ({
+    currency: group.currency,
+    participants: participants.map((name) => ({
+      name,
+      paid: group.paid_by_participant && group.paid_by_participant[name] ? group.paid_by_participant[name].amount : "0.00",
+      responsibility: group.responsibility_by_participant && group.responsibility_by_participant[name] ? group.responsibility_by_participant[name].amount : "0.00",
+    })),
+    transferText: (group.transfers || []).length
+      ? group.transfers.map((transfer) => `${transfer.from_participant_id} 需付给 ${transfer.to_participant_id} ¥${transfer.amount.amount} ${transfer.amount.currency}`).join("；")
+      : `双方已结清 ${group.currency}`,
+  }))
+}
+
 Page({
-  data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
+  data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, settlementGroups: [], settlementWarning: "", hasLoaded: false, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
     this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
-    return this.loadExpenses()
+    return this.loadExpenses().then(() => this.setData({ hasLoaded: true }))
   },
+  onShow() { return this.data.hasLoaded ? this.loadExpenses() : Promise.resolve() },
   loadExpenses() {
     return listExpenses(this.data.tripId)
-      .then((records) => this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency)), overview: buildOverview(records, this.data.currency), loading: false, loadError: "" }))
+      .then((records) => {
+        this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency)), overview: buildOverview(records, this.data.currency), settlementGroups: [], settlementWarning: "", loading: false, loadError: "" })
+        const preview = buildSettlementPreview(records, this.data.currency)
+        if (!preview || typeof previewSettlement !== "function") {
+          if (records.length) this.setData({ settlementWarning: "补全同行人、分摊或汇率后可查看结算" })
+          return records
+        }
+        return previewSettlement(this.data.tripId, preview)
+          .then((result) => { this.setData({ settlementGroups: settlementGroups(result, preview.participants), settlementWarning: "" }); return records })
+          .catch(() => { this.setData({ settlementGroups: [], settlementWarning: "补全同行人、分摊或汇率后可查看结算" }); return records })
+      })
       .catch(() => this.setData({ loading: false, loadError: "暂时无法读取消费记录" }))
   },
   openExpense(event) {
@@ -81,4 +122,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { buildOverview, defaultExpenseTitle, expenseSummary }
+if (typeof module !== "undefined") module.exports = { buildOverview, buildSettlementPreview, defaultExpenseTitle, expenseSummary, settlementGroups }
