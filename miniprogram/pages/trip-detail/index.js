@@ -8,12 +8,17 @@ function defaultExpenseTitle(now = new Date()) {
   return `${now.getMonth() + 1}月${now.getDate()}日消费`
 }
 
+function decodeQueryText(value) {
+  try { return decodeURIComponent(String(value || "")) } catch (_) { return String(value || "") }
+}
+
 function expenseSummary(record, currency) {
   const bill = (record.payload.expenses || [])[0] || {}
   const items = bill.items || []
   const total = items.reduce((sum, item) => sum + Math.round(Number(item.amount && item.amount.amount) * 100 || 0), 0)
   const itemCurrency = items[0] && items[0].amount && items[0].amount.currency || currency
-  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, total: (total / 100).toFixed(2), currency: itemCurrency, isCreator: Boolean(record.is_creator) }
+  const actualPayment = bill.actual_payment && validAmount(bill.actual_payment.amount) ? bill.actual_payment : null
+  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: bill.payer_id || "", itemCount: items.length, amountLabel: actualPayment ? "实际支付" : "商品小计", total: actualPayment ? actualPayment.amount : (total / 100).toFixed(2), currency: actualPayment ? actualPayment.currency : itemCurrency, originalTotal: actualPayment ? (total / 100).toFixed(2) : "", originalCurrency: actualPayment ? itemCurrency : "", isCreator: Boolean(record.is_creator) }
 }
 
 function buildOverview(records, currency) {
@@ -56,7 +61,7 @@ function settlementGroups(result, participants) {
 Page({
   data: { tripId: "", currency: "CNY", name: "", isOwner: false, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, settlementGroups: [], settlementWarning: "", hasLoaded: false, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
-    this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: query.name || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
+    this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: decodeQueryText(query.name) || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
     return this.loadExpenses().then(() => this.setData({ hasLoaded: true }))
   },
   onShow() { return this.data.hasLoaded ? this.loadExpenses() : Promise.resolve() },
@@ -122,4 +127,4 @@ Page({
   },
 })
 
-if (typeof module !== "undefined") module.exports = { buildOverview, buildSettlementPreview, defaultExpenseTitle, expenseSummary, settlementGroups }
+if (typeof module !== "undefined") module.exports = { buildOverview, buildSettlementPreview, decodeQueryText, defaultExpenseTitle, expenseSummary, settlementGroups }

@@ -41,6 +41,39 @@ test("trip detail lists saved expenses as compact summaries", async () => {
   assert.equal(page.data.expenses[0].total, "30.00")
 })
 
+test("trip detail decodes an encoded travel title", async () => {
+  const definition = loadTripDetail({ listExpenses: () => Promise.resolve([]) })
+  const page = pageInstance(definition)
+
+  await page.onLoad({ tripId: "trip-1", currency: "CNY", name: "%E4%B8%9C%E4%BA%AC%E6%97%85%E8%A1%8C" })
+
+  assert.equal(page.data.name, "东京旅行")
+})
+
+test("expense summary prioritizes actual payment and keeps the original item subtotal", () => {
+  const record = {
+    id: "expense-1", revision: 1, occurred_at: "2026-09-29",
+    payload: { title: "便利店", expenses: [{
+      payer_id: "我",
+      actual_payment: { amount: "54.8", currency: "CNY" },
+      items: [{ amount: { amount: "1287", currency: "JPY" } }],
+    }] },
+  }
+  const helpers = (() => {
+    const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.js"), "utf8")
+    const localModule = { exports: {} }
+    vm.runInNewContext(source, { Page() {}, require() { return {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
+    return localModule.exports
+  })()
+  const result = helpers.expenseSummary(record, "CNY")
+
+  assert.equal(result.total, "54.8")
+  assert.equal(result.currency, "CNY")
+  assert.equal(result.amountLabel, "实际支付")
+  assert.equal(result.originalTotal, "1287.00")
+  assert.equal(result.originalCurrency, "JPY")
+})
+
 test("trip detail derives a same-currency overview without mixing other currencies", async () => {
   const definition = loadTripDetail({ listExpenses: () => Promise.resolve([
     { id: "a", occurred_at: "2026-09-27", payload: { expenses: [{ items: [{ amount: { amount: "20", currency: "CNY" } }] }] } },
