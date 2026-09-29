@@ -65,7 +65,7 @@ class DeepSeekReceiptAi:
             ],
         }
         owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(timeout=30.0)
+        client = self._client or httpx.AsyncClient(timeout=45.0)
         started_at = time.monotonic()
         try:
             response = await client.post(self.url, headers={"Authorization": f"Bearer {self.api_key}"}, json=payload)

@@ -49,8 +49,11 @@ def test_receipt_job_uses_cloudbase_rpcs_and_persists_candidates(client: tuple[T
         files={"file": ("receipt.jpg", b"jpeg", "image/jpeg")},
     )
     assert response.status_code == 202
-    assert response.json()["data"]["candidates"][0]["translated_text"] == "茶"
+    assert response.json()["data"]["status"] == "queued"
+    assert response.json()["data"]["candidates"] == []
     assert [name for name, _ in provider.calls[:3]] == ["tsb_create_receipt_image", "tsb_mark_receipt_uploaded", "tsb_create_receipt_job"]
-    method, kwargs = provider.calls[3]
-    assert method == "PATCH /receipt_jobs"
-    assert kwargs["payload"]["status"] == "needs_review"
+    processing_method, processing = provider.calls[3]
+    completed_method, completed = provider.calls[4]
+    assert processing_method == completed_method == "PATCH /receipt_jobs"
+    assert processing["payload"]["status"] == "processing"
+    assert completed["payload"]["status"] == "needs_review"

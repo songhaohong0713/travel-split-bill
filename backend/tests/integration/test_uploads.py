@@ -1,16 +1,32 @@
 import logging
 from collections.abc import Generator
 
+import httpx
 import pytest
 from app.api.v1.auth import create_access_token
+from app.api.v1.uploads import _recognize
 from app.db.session import configure_database, create_schema, drop_schema
 from app.main import app
+from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
 from fastapi.testclient import TestClient
 
 
 class FakeReceiptAi:
     async def recognize(self, _: bytes) -> list[dict[str, str]]:
         return [{"source_text": "お茶", "translated_text": "茶", "amount": "120", "currency": "JPY"}]
+
+
+class TimeoutReceiptAi:
+    async def recognize(self, _: bytes) -> list[dict[str, str]]:
+        try:
+            raise httpx.ReadTimeout("slow provider")
+        except httpx.ReadTimeout as exc:
+            raise DeepSeekReceiptAiError("DeepSeek request failed") from exc
+
+
+@pytest.mark.anyio
+async def test_recognition_marks_provider_timeouts_after_two_attempts() -> None:
+    assert await _recognize(TimeoutReceiptAi(), b"jpeg") == ("failed", 2, [], "OCR_TIMEOUT")
 
 
 @pytest.fixture
@@ -36,8 +52,10 @@ def test_receipt_job_processes_jpeg_without_creating_expense(client: TestClient)
     )
 
     assert response.status_code == 202
-    assert response.json()['data']['status'] == 'needs_review'
-    assert response.json()['data']['candidates'] == [
+    assert response.json()['data'] == {'id': response.json()['data']['id'], 'status': 'queued', 'candidates': []}
+    job = client.get(f"/v1/receipt-jobs/{response.json()['data']['id']}", headers=headers)
+    assert job.json()['data']['status'] == 'needs_review'
+    assert job.json()['data']['candidates'] == [
         {'source_text': 'お茶', 'translated_text': '茶', 'amount': '120', 'currency': 'JPY'}
     ]
     assert client.get(f"/v1/trips/{trip['id']}/expenses", headers=headers).json()['data'] == []
@@ -55,7 +73,7 @@ def test_receipt_job_logs_safe_recognition_metadata(client: TestClient, caplog: 
         files={"file": ("receipt.jpg", b"jpeg", "image/jpeg")},
     )
 
-    assert "receipt_job recognition_finished status=needs_review attempts=1 candidates=1" in caplog.text
+    assert "status=needs_review attempts=1 candidates=1" in caplog.text
     assert "お茶" not in caplog.text
 
 

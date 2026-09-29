@@ -232,6 +232,12 @@ test("expense page starts OCR for a receipt selected before navigation", async (
   assert.equal(app.globalData.pendingReceiptPath, "")
 })
 
+test("expense page distinguishes OCR timeout from a generic failure", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.js"), "utf8")
+  assert.match(source, /OCR_TIMEOUT/)
+  assert.match(source, /识别超时，可重试或手动录入/)
+})
+
 test("saved expense opens in reading mode until edit is requested", async () => {
   const { definition } = loadExpensePage({
     listExpenses() { return Promise.resolve([{ id: "expense-1", revision: 1, occurred_at: "2026-09-28", payload: { title: "便利店", participants: ["我"], expenses: [{ payer_id: "我", items: [{ item_id: "tea", name: "绿茶", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }] }] } }]) },

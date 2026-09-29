@@ -2,7 +2,17 @@ import logging
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+import httpx
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser, DbSession
@@ -11,6 +21,7 @@ from app.db.models import ReceiptImage, ReceiptJob, Trip
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
+    CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
@@ -32,6 +43,7 @@ async def create_receipt_job(
     trip_id: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
     http_request: Request,
+    background_tasks: BackgroundTasks,
     session: DbSession,
     user_id: CurrentUser,
 ) -> dict[str, object]:
@@ -63,13 +75,43 @@ async def create_receipt_job(
         session.commit()
 
     provider = getattr(http_request.app.state, "receipt_ai", None)
-    status_value, attempts, candidates, error_code = await _recognize(provider, image_bytes)
+    background_tasks.add_task(_complete_receipt_job, cloudbase, session, provider, job_id, image_bytes)
+    logger.info("receipt_job queued job_id=%s image_bytes=%s", job_id, len(image_bytes))
+    return {"data": {"id": job_id, "status": "queued", "candidates": []}}
+
+
+async def _complete_receipt_job(
+    cloudbase: CloudBasePgClient | None,
+    session: DbSession,
+    provider: object,
+    job_id: str,
+    image_bytes: bytes,
+) -> None:
+    await _persist_receipt_job(cloudbase, session, job_id, "processing", 0, [], None)
+    try:
+        status_value, attempts, candidates, error_code = await _recognize(provider, image_bytes)
+    except Exception:
+        logger.exception("receipt_job recognition_crashed job_id=%s", job_id)
+        status_value, attempts, candidates, error_code = "failed", 0, [], "OCR_FAILED"
     logger.info(
-        "receipt_job recognition_finished status=%s attempts=%s candidates=%s",
+        "receipt_job recognition_finished job_id=%s status=%s attempts=%s candidates=%s",
+        job_id,
         status_value,
         attempts,
         len(candidates),
     )
+    await _persist_receipt_job(cloudbase, session, job_id, status_value, attempts, candidates, error_code)
+
+
+async def _persist_receipt_job(
+    cloudbase: CloudBasePgClient | None,
+    session: DbSession,
+    job_id: str,
+    status_value: str,
+    attempts: int,
+    candidates: list[dict[str, str]],
+    error_code: str | None,
+) -> None:
     if cloudbase is not None:
         try:
             await cloudbase.request(
@@ -78,32 +120,34 @@ async def create_receipt_job(
                 params={"id": f"eq.{job_id}"},
                 payload={"status": status_value, "attempts": attempts, "candidates_json": candidates, "error_code": error_code},
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
-            raise _cloudbase_error(exc) from exc
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable):
+            logger.exception("receipt_job status_persist_failed job_id=%s status=%s", job_id, status_value)
     else:
         job = session.get(ReceiptJob, job_id)
         if job is None:
-            raise _not_found()
+            logger.error("receipt_job status_persist_missing job_id=%s", job_id)
+            return
         job.status, job.attempts, job.candidates_json, job.error_code = status_value, attempts, candidates, error_code
         session.commit()
-    return {"data": {"id": job_id, "status": status_value, "candidates": candidates}}
 
 
 async def _recognize(provider: object, image_bytes: bytes) -> tuple[str, int, list[dict[str, str]], str | None]:
     if provider is None:
         return "failed", 0, [], "OCR_FAILED"
-    for attempts in range(1, 4):
+    timed_out = False
+    for attempts in range(1, 3):
         try:
             candidates = await provider.recognize(image_bytes)
             return "needs_review", attempts, candidates, None
         except DeepSeekReceiptAiError as exc:
+            timed_out = timed_out or isinstance(exc.__cause__, httpx.TimeoutException)
             logger.warning(
                 "receipt_job recognition_attempt_failed attempt=%s error_type=%s",
                 attempts,
                 type(exc).__name__,
             )
             continue
-    return "failed", 3, [], "OCR_FAILED"
+    return "failed", 2, [], "OCR_TIMEOUT" if timed_out else "OCR_FAILED"
 
 
 @router.get("/receipt-jobs/{job_id}")
