@@ -1,8 +1,8 @@
 <view class="page">
   <view class="masthead">
-    <text class="eyebrow">RECEIPT REVIEW</text>
-    <text class="title">核对识别结果</text>
-    <text class="subtitle">识别只提供候选。点选后请确认原文和金额，再带回手动录入。</text>
+    <text class="eyebrow">小票识别</text>
+    <text class="title">批量核对商品</text>
+    <text class="subtitle">已识别 {{candidates.length}} 项。取消不需要的条目，修改后一次加入账单。</text>
   </view>
 
   <view wx:if="{{status === 'failed'}}" class="failure-card">
@@ -12,11 +12,14 @@
   </view>
 
   <view wx:else>
-    <view wx:if="{{candidates.length}}" class="card">
-      <text class="label">原文候选（点选一条填入下方）</text>
-      <view wx:for="{{candidates}}" wx:key="id" class="candidate {{selectedId === item.id ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="chooseCandidate">
-        <text class="candidate-text">{{item.sourceText}}</text>
-        <text wx:if="{{item.amount}}" class="candidate-amount">{{item.amount}}</text>
+    <view wx:if="{{candidates.length}}" class="review-list">
+      <view wx:for="{{candidates}}" wx:key="id" class="review-item {{item.selected ? '' : 'excluded'}}">
+        <view class="review-head"><checkbox checked="{{item.selected}}" color="#173C48" data-id="{{item.id}}" bindtap="toggleCandidate"/><text class="source-text">{{item.sourceText}}</text></view>
+        <view class="edit-grid">
+          <view class="edit-field name-field"><text class="label">中文名称</text><input value="{{item.translatedText}}" placeholder="填写中文名称" data-id="{{item.id}}" data-field="translatedText" bindinput="updateCandidate"/></view>
+          <view class="edit-field amount-field"><text class="label">金额</text><input type="digit" value="{{item.amount}}" placeholder="0.00" data-id="{{item.id}}" data-field="amount" bindinput="updateCandidate"/></view>
+          <view class="edit-field currency-field"><text class="label">币种</text><input value="{{item.currency}}" placeholder="JPY" maxlength="3" data-id="{{item.id}}" data-field="currency" bindinput="updateCandidate"/></view>
+        </view>
       </view>
     </view>
     <view wx:else class="empty-card">
@@ -24,15 +27,7 @@
       <text class="hint">请直接手动填写，不会影响后续分账。</text>
     </view>
 
-    <view class="card manual-card">
-      <text class="label">商品原文</text>
-      <input placeholder="例如：お茶 120" value="{{sourceText}}" bindinput="onSourceText" />
-      <text class="label">中文翻译（可编辑）</text>
-      <input placeholder="例如：茶" value="{{translatedText}}" bindinput="onTranslatedText" />
-      <text class="label">商品金额</text>
-      <input type="digit" placeholder="例如：120" value="{{amount}}" bindinput="onAmount" />
-      <text class="hint">请以小票为准。税额、归属和优惠仍在手动录入页设置。</text>
-    </view>
-    <button class="primary" bindtap="applyManualItem">确认并带回录入页</button>
+    <text wx:if="{{candidates.length}}" class="hint review-hint">税额、优惠和分担方式将在账单页统一设置。</text>
+    <button wx:if="{{candidates.length}}" class="primary" bindtap="confirmSelected">确认所选商品</button>
   </view>
 </view>

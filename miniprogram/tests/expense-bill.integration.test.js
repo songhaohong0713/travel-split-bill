@@ -238,6 +238,22 @@ test("expense page distinguishes OCR timeout from a generic failure", () => {
   assert.match(source, /识别超时，可重试或手动录入/)
 })
 
+test("recognized receipt opens batch review before adding items", async () => {
+  let navigation
+  const api = { getReceiptJob: () => Promise.resolve({ status: "needs_review", candidates: [{ source_text: "お茶", translated_text: "茶", amount: "120", currency: "JPY" }] }) }
+  const { definition } = loadExpensePage(api, { navigateTo(options) { navigation = options } })
+  const instance = pageInstance(definition)
+  let applied = []
+  instance.applyOcrCandidates = (items) => { applied = items }
+
+  await instance.pollOcr("job-1")
+
+  assert.match(navigation.url, /pages\/ocr-review\/index/)
+  assert.equal(applied.length, 0)
+  navigation.events.ocrCandidatesConfirmed([{ source_text: "お茶", translated_text: "绿茶", amount: "120", currency: "JPY" }])
+  assert.equal(applied[0].translated_text, "绿茶")
+})
+
 test("saved expense opens in reading mode until edit is requested", async () => {
   const { definition } = loadExpensePage({
     listExpenses() { return Promise.resolve([{ id: "expense-1", revision: 1, occurred_at: "2026-09-28", payload: { title: "便利店", participants: ["我"], expenses: [{ payer_id: "我", items: [{ item_id: "tea", name: "绿茶", amount: { amount: "20", currency: "CNY" }, allocation: { 我: "1" } }] }] } }]) },

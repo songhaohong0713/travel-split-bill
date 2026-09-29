@@ -17,3 +17,12 @@ input { min-height: 84rpx; margin-bottom: 28rpx; padding: 0 20rpx; background: #
 .primary, .secondary { border-radius: 16rpx; font-weight: 600; }
 .primary { background: #173C48; color: #FFFDF6; }
 .secondary { margin-top: 28rpx; color: #173C48; background: #D9E5DE; }
+.review-list { display:flex; flex-direction:column; gap:18rpx; margin-bottom:26rpx; }
+.review-item { padding:24rpx; border:2rpx solid #ddd8cc; border-radius:18rpx; background:#fffdf6; }
+.review-item.excluded { opacity:.48; }
+.review-head { display:flex; align-items:flex-start; gap:14rpx; margin-bottom:18rpx; }
+.source-text { flex:1; color:#617176; font-size:23rpx; line-height:1.5; }
+.edit-grid { display:grid; grid-template-columns:minmax(0,1fr) 150rpx 112rpx; gap:12rpx; }
+.edit-field .label { margin-bottom:8rpx; font-size:20rpx; }
+.edit-field input { box-sizing:border-box; width:100%; min-height:72rpx; margin:0; padding:0 14rpx; }
+.review-hint { margin:4rpx 4rpx 22rpx; }

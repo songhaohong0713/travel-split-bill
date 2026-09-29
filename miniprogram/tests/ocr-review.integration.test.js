@@ -39,6 +39,25 @@ test("OCR confirmation returns original text, translation, and amount to the exp
   }])
 })
 
+test("OCR review confirms every selected and edited receipt item", () => {
+  const review = loadPage("pages/ocr-review/index.js", { wx: { navigateBack() {}, showToast() {} } })
+  const emitted = []
+  const instance = pageInstance(review)
+  instance.getOpenerEventChannel = () => ({ emit: (name, value) => emitted.push({ name, value }) })
+  instance.onLoad({ candidates: encodeURIComponent(JSON.stringify([
+    { source_text: "お茶", translated_text: "茶", amount: "120", currency: "JPY" },
+    { source_text: "袋", translated_text: "塑料袋", amount: "5", currency: "JPY" },
+  ])) })
+  instance.updateCandidate({ currentTarget: { dataset: { id: "0", field: "translatedText" } }, detail: { value: "绿茶" } })
+  instance.toggleCandidate({ currentTarget: { dataset: { id: "1" } } })
+  instance.confirmSelected()
+
+  assert.deepEqual(JSON.parse(JSON.stringify(emitted)), [{
+    name: "ocrCandidatesConfirmed",
+    value: [{ source_text: "お茶", translated_text: "绿茶", amount: "120", currency: "JPY" }],
+  }])
+})
+
 test("OCR review page is registered", () => {
   const app = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "app.json"), "utf8"))
   assert.ok(app.pages.includes("pages/ocr-review/index"))

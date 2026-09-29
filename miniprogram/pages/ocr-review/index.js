@@ -21,7 +21,9 @@ function candidateFrom(value, index) {
     id: String(index),
     sourceText,
     translatedText,
-    amount: amountFromText(sourceText),
+    amount: typeof value === "string" ? amountFromText(sourceText) : String(value && value.amount || amountFromText(sourceText)).trim(),
+    currency: typeof value === "string" ? "" : String(value && value.currency || "").trim().toUpperCase(),
+    selected: true,
   }
 }
 
@@ -51,6 +53,16 @@ Page({
     this.setData({ selectedId: item.id, sourceText: item.sourceText, translatedText: item.translatedText, amount: item.amount })
   },
 
+  toggleCandidate(event) {
+    const id = event.currentTarget.dataset.id
+    this.setData({ candidates: this.data.candidates.map((item) => item.id === id ? { ...item, selected: !item.selected } : item) })
+  },
+
+  updateCandidate(event) {
+    const { id, field } = event.currentTarget.dataset
+    this.setData({ candidates: this.data.candidates.map((item) => item.id === id ? { ...item, [field]: event.detail.value } : item) })
+  },
+
   onSourceText(event) { this.setData({ sourceText: event.detail.value }) },
   onTranslatedText(event) { this.setData({ translatedText: event.detail.value }) },
   onAmount(event) { this.setData({ amount: event.detail.value }) },
@@ -64,6 +76,14 @@ Page({
     }
     const channel = this.getOpenerEventChannel && this.getOpenerEventChannel()
     if (channel && channel.emit) channel.emit("ocrCandidateConfirmed", { sourceText, translatedText: this.data.translatedText.trim(), amount })
+    wx.navigateBack()
+  },
+
+  confirmSelected() {
+    const selected = this.data.candidates.filter((item) => item.selected && item.sourceText.trim() && item.translatedText.trim() && item.amount.trim()).map((item) => ({ source_text: item.sourceText.trim(), translated_text: item.translatedText.trim(), amount: item.amount.trim(), currency: item.currency.trim().toUpperCase() }))
+    if (!selected.length) return wx.showToast({ title: "请至少保留一件完整商品", icon: "none" })
+    const channel = this.getOpenerEventChannel && this.getOpenerEventChannel()
+    if (channel && channel.emit) channel.emit("ocrCandidatesConfirmed", selected)
     wx.navigateBack()
   },
 
