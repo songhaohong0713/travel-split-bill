@@ -2,7 +2,7 @@
   <view wx:if="{{reading}}" class="expense-reading">
     <view class="masthead"><text class="kicker">消费详情</text><text class="reading-title">{{title}}</text><text class="expense-date">{{occurredAt}}</text></view>
     <view class="reading-total"><text>{{checkoutLabel}}</text><view><text class="reading-amount">¥{{checkoutAmount}}</text><text class="currency">{{checkoutCurrency}}</text></view><text wx:if="{{currency !== checkoutCurrency}}" class="reading-original">商品小计 ¥{{billTotal}} {{currency}}</text></view>
-    <view class="reading-card"><text class="section-title">付款与结算</text><view class="reading-line"><text>付款人</text><text>{{payer}}</text></view><view class="reading-line"><text>结算方式</text><text wx:if="{{actualPaymentAmount}}">实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}}</text><text wx:elif="{{currency === settlementCurrency}}">原币结算</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}}</text><text wx:else>待补充汇率</text></view></view>
+    <view class="reading-card"><text class="section-title">付款与结算</text><view class="reading-line"><text>付款人</text><text>{{payerLabel || payer}}</text></view><view class="reading-line"><text>结算方式</text><text wx:if="{{actualPaymentAmount}}">实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}}</text><text wx:elif="{{currency === settlementCurrency}}">原币结算</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}}</text><text wx:else>待补充汇率</text></view><view class="responsibility-list"><view wx:for="{{responsibilityRows}}" wx:key="id" class="reading-line"><text>{{item.label}}应承担</text><text>¥{{item.amount}} {{item.currency}}</text></view></view><text wx:if="{{expenseAdvanceText}}" class="advance-note">{{expenseAdvanceText}}</text></view>
     <view class="reading-card"><view class="list-heading"><text class="section-title">商品明细</text><text class="summary-note">共 {{items.length}} 项</text></view><view wx:for="{{items}}" wx:key="id" class="reading-item"><view><text class="reading-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-meta">{{item.allocationMode === 'payer' ? '付款人承担' : item.allocationMode === 'friend' ? '同行人承担' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text></view><view><text class="compact-item-amount">¥{{item.amount}}</text><text class="currency">{{currency}}</text></view></view></view>
     <view wx:if="{{taxAmount || adjustmentAmount}}" class="reading-card"><text class="section-title">账单调整</text><view wx:if="{{taxAmount}}" class="reading-line"><text>税额</text><text>¥{{taxAmount}} {{currency}}</text></view><view wx:if="{{adjustmentAmount}}" class="reading-line"><text>{{adjustmentLabels[adjustmentType]}}</text><text>¥{{adjustmentAmount}} {{currency}}</text></view></view>
     <button class="reading-edit" bindtap="beginEditing">编辑此笔消费</button>
@@ -16,8 +16,8 @@
   <view class="bill-summary">
     <view class="summary-head"><text class="section-title">同行信息</text><text class="summary-note">同行人可留空</text></view>
     <view class="people-grid">
-      <view class="person-field"><text class="field-label">付款人</text><input placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
-      <view class="person-field"><text class="field-label">同行人</text><input placeholder="例如：小林" value="{{friend}}" bindinput="onFriend"/></view>
+      <view class="person-field"><text class="field-label">付款人</text><picker wx:if="{{memberOptions.length}}" range="{{memberLabels}}" value="{{payerIndex}}" bindchange="onPayerMember"><view class="member-picker">{{payerLabel || "我"}} ⌄</view></picker><input wx:else placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
+      <view class="person-field"><text class="field-label">同行人</text><text class="member-readonly">{{friendLabel || "仅付款人"}}</text></view>
     </view>
   </view>
   <view class="receipt-section">
@@ -48,6 +48,7 @@
     </view></view>
     <button class="add-ticket" bindtap="addItem">+ 手动添加商品</button>
     <view class="expense-subtotal"><text>本次消费小计</text><view><text class="subtotal-value">¥{{billTotal}}</text><text class="subtotal-currency">{{currency}}</text></view></view>
+    <view class="responsibility-summary"><view class="summary-head"><text class="section-title">本笔分担</text><text class="summary-note">保存前实时计算</text></view><view wx:for="{{responsibilityRows}}" wx:key="id" class="responsibility-row"><text>{{item.label}}</text><text>¥{{item.amount}} {{item.currency}}</text></view></view>
     <view class="expense-settlement">
       <view class="settlement-row"><view><text class="section-title">本笔结算</text><text class="settlement-copy">一张小票使用一条结算规则</text></view><picker wx:if="{{!settlementCurrencyLocked}}" range="{{settlementCurrencies}}" value="{{settlementCurrencyIndex}}" bindchange="onSettlementCurrency"><view class="settlement-picker">{{settlementCurrency}} ⌄</view></picker><text wx:else class="settlement-locked">{{settlementCurrency}} 已锁定</text></view>
       <view class="rate-summary"><text wx:if="{{actualPaymentAmount}}">按实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}} 结算</text><text wx:elif="{{currency === settlementCurrency}}">原币种与结算币种相同</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}} · {{rateEffectiveDate}}</text><text wx:else>未获取汇率</text></view>

@@ -119,6 +119,26 @@ test("trip detail shows paid responsibility and pending transfer from settlement
   assert.equal(page.data.settlementWarning, "")
 })
 
+test("trip detail translates stable member ids into relative labels", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.js"), "utf8")
+  const localModule = { exports: {} }
+  vm.runInNewContext(source, { Page() {}, require() { return {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
+  const helpers = localModule.exports
+  const labels = helpers.memberLabels([
+    { id: "owner-id", is_current: false },
+    { id: "peer-id", is_current: true },
+  ])
+  const groups = helpers.settlementGroups({ groups: [{
+    currency: "CNY",
+    paid_by_participant: { "owner-id": { amount: "100.00" }, "peer-id": { amount: "0.00" } },
+    responsibility_by_participant: { "owner-id": { amount: "50.00" }, "peer-id": { amount: "50.00" } },
+    transfers: [{ from_participant_id: "peer-id", to_participant_id: "owner-id", amount: { amount: "50.00", currency: "CNY" } }],
+  }] }, ["owner-id", "peer-id"], labels)
+  assert.equal(groups[0].participants[0].name, "同行人")
+  assert.equal(groups[0].participants[1].name, "我")
+  assert.equal(groups[0].transferText, "我 需付给 同行人 ¥50.00 CNY")
+})
+
 test("trip detail keeps expenses visible when settlement preview is incomplete", async () => {
   const definition = loadTripDetail({
     listExpenses: () => Promise.resolve([{
@@ -173,7 +193,7 @@ test("trip detail exposes compact expense summaries and a receipt-first action",
   assert.match(wxml, /class="expense-summary"/)
   assert.match(wxml, /class="expense-preview"/)
   assert.match(wxml, /拍小票，记录消费/)
-  assert.match(wxml, /旅行结算/)
+  assert.match(wxml, /待结清/)
   assert.match(wxml, /实际支付/)
   assert.match(wxml, /应承担/)
 })

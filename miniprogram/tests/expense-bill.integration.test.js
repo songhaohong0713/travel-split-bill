@@ -90,6 +90,82 @@ test("buildBillPayload keeps per-item allocations", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(result.expenses[0].items.map((item) => item.name))), ["晚餐", "甜点"])
 })
 
+test("new bills keep stable member ids while exposing friendly labels", () => {
+  const { helpers } = loadExpensePage({})
+  const members = helpers.memberChoices([
+    { id: "user-owner", is_owner: true, is_current: true },
+    { id: "user-peer", is_owner: false, is_current: false },
+  ])
+  assert.deepEqual(JSON.parse(JSON.stringify(members)), [
+    { id: "user-owner", label: "我" },
+    { id: "user-peer", label: "同行人" },
+  ])
+  const payload = helpers.buildBillPayload({
+    currency: "JPY", settlementCurrency: "CNY", payer: "user-owner", friend: "user-peer",
+    items: [{ id: "meal", name: "午饭", amount: "1000", allocationMode: "split", payerPercent: "50", friendPercent: "50" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0,
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.participants)), ["user-owner", "user-peer"])
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.expenses[0].items[0].allocation)), { "user-owner": "0.5", "user-peer": "0.5" })
+})
+
+test("responsibility summary includes items and shared adjustments", () => {
+  const { helpers } = loadExpensePage({})
+  const rows = helpers.responsibilityRows({
+    currency: "JPY", payer: "user-owner", friend: "user-peer",
+    memberOptions: [{ id: "user-owner", label: "我" }, { id: "user-peer", label: "同行人" }],
+    items: [
+      { amount: "1000", allocationMode: "split", payerPercent: "50", friendPercent: "50" },
+      { amount: "200", allocationMode: "payer", payerPercent: "100", friendPercent: "0" },
+    ],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "-100", adjustmentType: 0,
+  })
+  assert.deepEqual(JSON.parse(JSON.stringify(rows)), [
+    { id: "user-owner", label: "我", amount: "650.00", currency: "JPY" },
+    { id: "user-peer", label: "同行人", amount: "450.00", currency: "JPY" },
+  ])
+})
+
+test("saved bills restore tax and adjustment inputs for the same responsibility result", () => {
+  const { helpers } = loadExpensePage({})
+  const hydrated = helpers.hydrateExpense({
+    id: "expense-1", revision: 1, occurred_at: "2026-09-29",
+    payload: { title: "晚餐", participants: ["me", "peer"], expenses: [{
+      payer_id: "me",
+      items: [{ item_id: "meal", name: "晚餐", amount: { amount: "100", currency: "CNY" }, allocation: { me: "0.5", peer: "0.5" }, tax_amount: { amount: "10", currency: "CNY" }, tax_included: false }],
+      adjustments: [{ amount: { amount: "-20", currency: "CNY" }, reason: "personal_coupon", allocation: { me: "1" } }],
+    }] },
+  })
+  assert.equal(hydrated.taxAmount, "10")
+  assert.equal(hydrated.taxIncluded, false)
+  assert.equal(hydrated.adjustmentAmount, "-20")
+  assert.equal(hydrated.adjustmentType, 1)
+})
+
+test("expense advance compares payer payment with payer responsibility", () => {
+  const { helpers } = loadExpensePage({})
+  assert.equal(helpers.expenseAdvanceText({
+    payer: "me", payerLabel: "我", currency: "CNY", billTotal: "100.00",
+    actualPaymentAmount: "", actualPaymentCurrency: "",
+    responsibilityRows: [{ id: "me", label: "我", amount: "50.00", currency: "CNY" }],
+  }), "我本笔垫付 ¥50.00 CNY")
+})
+
+test("editing a saved expense returns to the travel detail after save", async () => {
+  let navigatedBack = false
+  const api = {
+    updateExpense: () => Promise.resolve({ id: "expense-1", revision: 2, occurred_at: "2026-09-29" }),
+  }
+  const { definition } = loadExpensePage(api, { navigateBack() { navigatedBack = true } })
+  const instance = pageInstance(definition, {
+    tripId: "trip-1", expenseId: "expense-1", revision: 1, occurredAt: "2026-09-29", title: "午饭",
+    currency: "CNY", settlementCurrency: "CNY", payer: "me", friend: "", memberOptions: [{ id: "me", label: "我" }],
+    items: [{ id: "a", name: "饭", amount: "20", allocationMode: "payer", payerPercent: "100", friendPercent: "0" }],
+  })
+  await instance.saveAndPreview()
+  assert.equal(navigatedBack, true)
+})
+
 test("checkout summary uses settlement currency when a rate is available", () => {
   const { helpers } = loadExpensePage({})
   assert.deepEqual(JSON.parse(JSON.stringify(helpers.checkoutSummary({ billTotal: "5000.00", currency: "JPY", settlementCurrency: "CNY", estimatedSettlementAmount: "212.95", actualPaymentAmount: "", actualPaymentCurrency: "" }))), { label: "预计结算", amount: "212.95", currency: "CNY" })

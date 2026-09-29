@@ -160,11 +160,26 @@ async def list_trips(
 
 @router.get("/trips/{trip_id}/members")
 async def list_trip_members(trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser) -> dict[str, list[dict[str, object]]]:
-    if _cloudbase(http_request) is not None:
-        raise _cloudbase_error(ValueError("trip membership requires CloudBase migration"))
+    cloudbase = _cloudbase(http_request)
+    if cloudbase is not None:
+        try:
+            memberships = await cloudbase.rpc("tsb_list_member_trips", {"p_user_id": user_id})
+            trip = next((row for row in memberships if isinstance(row, dict) and str(row.get("id", "")) == trip_id), None) if isinstance(memberships, list) else None
+            if trip is None:
+                raise _not_found()
+            rows = await cloudbase.request(
+                "GET", "/trip_members",
+                params={"trip_id": f"eq.{trip_id}", "select": "user_id,joined_at", "order": "joined_at.asc"},
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(rows, list):
+            raise _cloudbase_error(ValueError("invalid CloudBase member response"))
+        owner_id = user_id if bool(trip.get("is_owner", False)) else next((str(row["user_id"]) for row in rows if str(row.get("user_id", "")) != user_id), "")
+        return {"data": [{"id": str(row["user_id"]), "is_owner": str(row["user_id"]) == owner_id, "is_current": str(row["user_id"]) == user_id} for row in rows]}
     trip = require_trip_member(session, trip_id, user_id)
     members = session.scalars(select(TripMember).where(TripMember.trip_id == trip.id).order_by(TripMember.joined_at)).all()
-    return {"data": [{"id": member.user_id, "is_owner": member.user_id == trip.owner_id} for member in members]}
+    return {"data": [{"id": member.user_id, "is_owner": member.user_id == trip.owner_id, "is_current": member.user_id == user_id} for member in members]}
 
 @router.get("/trips/{trip_id}/expenses")
 async def list_expenses(

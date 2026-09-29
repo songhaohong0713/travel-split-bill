@@ -7,6 +7,11 @@
 .section-title { display: block; font-size: 32rpx; font-weight: 700; }
 .summary-note, .batch-note, .receipt-status, .small-note { color: #66767A; font-size: 23rpx; }
 .people-grid { display: flex; gap: 14rpx; margin-top: 14rpx; }
+.member-picker,.member-readonly { display:block; min-height:52rpx; padding:12rpx 0; border-bottom:1rpx solid #d9ded8; color:#123e45; }
+.responsibility-summary { margin-top:18rpx; padding:22rpx; border-radius:18rpx; background:#eef5f0; }
+.responsibility-row { display:flex; justify-content:space-between; padding:12rpx 0; color:#31555b; border-bottom:1rpx solid rgba(18,62,69,.1); }
+.responsibility-row:last-child { border-bottom:0; }
+.advance-note { display:block; margin-top:14rpx; padding-top:14rpx; border-top:1rpx solid #e1ddd4; color:#c2633f; font-size:23rpx; font-weight:600; }
 .person-field { flex: 1; min-width: 0; }
 .field-label { display: block; color: #66767A; font-size: 23rpx; }
 .person-field input, .quiet-input { margin-top: 12rpx; padding: 16rpx 0; border-bottom: 2rpx solid #D9D2C6; font-size: 29rpx; }
