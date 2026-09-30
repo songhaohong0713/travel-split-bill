@@ -74,6 +74,24 @@ def test_invited_user_can_join_list_and_edit_trip(client: TestClient) -> None:
         {"id": "peer-b", "is_owner": False, "is_current": True},
     ]
 
+    preview = client.post(
+        f"/v1/trips/{trip_id}/settlements/preview",
+        headers=auth("peer-b"),
+        json={
+            "settlement_currency": "JPY",
+            "participants": ["owner-a", "peer-b"],
+            "expenses": [{
+                "expense_id": "ticket",
+                "payer_id": "peer-b",
+                "items": [{"item_id": "ticket", "amount": {"currency": "JPY", "amount": "2000"}, "allocation": {"owner-a": "0.5", "peer-b": "0.5"}}],
+            }],
+        },
+    )
+    assert preview.status_code == 200
+    result = preview.json()["data"]
+    assert sum(int(value["amount"]) for value in result["responsibility_by_participant"].values()) == 2000
+    assert result["transfers"] == [{"from_participant_id": "owner-a", "to_participant_id": "peer-b", "amount": {"currency": "JPY", "amount": "1000"}}]
+
 
 def test_trip_invite_can_only_be_accepted_once(client: TestClient) -> None:
     trip_id = create_trip(client)

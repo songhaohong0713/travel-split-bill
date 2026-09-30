@@ -1,4 +1,5 @@
-const { publishSettlement, createShareLink } = require("../../services/api")
+const { publishSettlement, createShareLink, listTripMembers } = require("../../services/api")
+const { memberLabelMap } = require("../../services/member-labels")
 
 function readJson(value, fallback) {
   try { return value ? JSON.parse(decodeURIComponent(value)) : fallback } catch (_) { return fallback }
@@ -17,12 +18,22 @@ function currencyGroups(result) {
   return [{ currency, transfers }]
 }
 
+function displayGroups(result, labels = {}) {
+  return currencyGroups(result).map((group) => ({ ...group, transfers: (group.transfers || []).map((transfer) => ({
+    ...transfer,
+    fromName: labels[transfer.from_participant_id] || "同行人",
+    toName: labels[transfer.to_participant_id] || "同行人",
+  })) }))
+}
+
 Page({
   data: { transfers: [], currencyGroups: [], tripId: "", previewPayload: null, published: false, publishing: false, sharing: false, expiryIndex: 1, expiryDays: [1, 7, 30], shareUrl: "", shareExpiresAt: "" },
   onLoad(query) {
     const result = readJson(query.result, {})
     const previewPayload = readJson(query.preview, null)
-    this.setData({ tripId: query.tripId || "", previewPayload, transfers: result.transfers || [], currencyGroups: currencyGroups(result) })
+    const tripId = query.tripId || ""
+    this.setData({ tripId, previewPayload, transfers: result.transfers || [], currencyGroups: displayGroups(result) })
+    return listTripMembers(tripId).then((members) => this.setData({ currencyGroups: displayGroups(result, memberLabelMap(members)) })).catch(() => {})
   },
   onExpiryChange(e) { this.setData({ expiryIndex: Number(e.detail.value) }) },
   publish() {
@@ -32,8 +43,10 @@ Page({
     this.setData({ publishing: true })
     publishSettlement(tripId, previewPayload)
       .then((published) => {
-        this.setData({ published: true, transfers: published.result.transfers || this.data.transfers, currencyGroups: currencyGroups(published.result) })
-        wx.showToast({ title: "结算版本已发布", icon: "success" })
+        return listTripMembers(tripId).catch(() => []).then((members) => {
+          this.setData({ published: true, transfers: published.result.transfers || this.data.transfers, currencyGroups: displayGroups(published.result, memberLabelMap(members)) })
+          wx.showToast({ title: "结算版本已发布", icon: "success" })
+        })
       })
       .catch((e) => wx.showToast({ title: e.message || "发布失败", icon: "none" }))
       .finally(() => this.setData({ publishing: false }))
@@ -59,4 +72,4 @@ Page({
   }
 })
 
-if (typeof module !== "undefined") module.exports = { currencyGroups }
+if (typeof module !== "undefined") module.exports = { currencyGroups, displayGroups }

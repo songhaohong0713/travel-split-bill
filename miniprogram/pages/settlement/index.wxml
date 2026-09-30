@@ -11,7 +11,7 @@
         <text class="list-label">{{item.currency}} 结算</text>
         <block wx:if="{{item.transfers.length}}">
           <view wx:for="{{item.transfers}}" wx:for-item="transfer" wx:key="from_participant_id" class="transfer-card">
-            <view class="transfer-route"><text class="person-name">{{transfer.from_participant_id}}</text><text class="route-arrow">转给</text><text class="person-name">{{transfer.to_participant_id}}</text></view>
+            <view class="transfer-route"><text class="person-name">{{transfer.fromName}}</text><text class="route-arrow">转给</text><text class="person-name">{{transfer.toName}}</text></view>
             <view class="transfer-amount"><text class="amount-currency">{{transfer.amount.currency}}</text><text class="amount-value">{{transfer.amount.amount}}</text></view>
           </view>
         </block>

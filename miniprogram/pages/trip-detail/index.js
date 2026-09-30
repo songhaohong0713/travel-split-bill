@@ -1,4 +1,5 @@
 const { createTripInvite, deleteExpense, deleteTrip, listExpenses, listTripMembers, previewSettlement } = require("../../services/api")
+const { memberLabelMap } = require("../../services/member-labels")
 
 function confirmDelete(content) {
   return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
@@ -12,9 +13,7 @@ function decodeQueryText(value) {
   try { return decodeURIComponent(String(value || "")) } catch (_) { return String(value || "") }
 }
 
-function memberLabels(members) {
-  return Object.fromEntries((members || []).map((member) => [String(member.id), member.is_current ? "我" : "同行人"]))
-}
+const memberLabels = memberLabelMap
 
 function expenseSummary(record, currency, labels = {}) {
   const bill = (record.payload.expenses || [])[0] || {}

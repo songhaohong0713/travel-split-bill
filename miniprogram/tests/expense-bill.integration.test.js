@@ -59,7 +59,7 @@ function loadExpensePage(api, wx = {}, app = { globalData: {} }) {
   const module = { exports: {} }
   vm.runInNewContext(source, {
     Page(value) { definition = value },
-    require() { return api },
+    require(request) { return request.includes("member-labels") ? require("../services/member-labels") : api },
     getApp() { return app },
     wx: { showToast() {}, ...wx },
     setTimeout() {},
@@ -107,6 +107,46 @@ test("new bills keep stable member ids while exposing friendly labels", () => {
   })
   assert.deepEqual(JSON.parse(JSON.stringify(payload.participants)), ["user-owner", "user-peer"])
   assert.deepEqual(JSON.parse(JSON.stringify(payload.expenses[0].items[0].allocation)), { "user-owner": "0.5", "user-peer": "0.5" })
+})
+
+test("switching payer keeps the other member as the companion", () => {
+  const { definition } = loadExpensePage({})
+  const instance = pageInstance(definition, {
+    payer: "user-owner", friend: "user-peer", payerIndex: 0,
+    memberOptions: [{ id: "user-owner", label: "我" }, { id: "user-peer", label: "小卢" }],
+  })
+
+  instance.onPayerMember({ detail: { value: "1" } })
+
+  assert.equal(instance.data.payer, "user-peer")
+  assert.equal(instance.data.friend, "user-owner")
+  assert.equal(helpersError(definition, instance.data), "")
+})
+
+function helpersError(definition, data) {
+  const { helpers } = loadExpensePage({})
+  return helpers.validateBill({ ...data, currency: "JPY", settlementCurrency: "JPY", items: [{ name: "门票", amount: "2000", allocationMode: "payer", payerPercent: "100", friendPercent: "0" }] })
+}
+
+test("responsibility rows conserve a 2000 JPY bill without duplicate identities", () => {
+  const { helpers } = loadExpensePage({})
+  const rows = helpers.responsibilityRows({
+    currency: "JPY", payer: "peer", friend: "owner",
+    memberOptions: [{ id: "owner", label: "我" }, { id: "peer", label: "同行人" }],
+    items: [{ amount: "2000", allocationMode: "split", payerPercent: "50", friendPercent: "50" }],
+    taxAmount: "", taxIncluded: true, adjustmentAmount: "",
+  })
+  assert.equal(rows.length, 2)
+  assert.equal(rows.reduce((sum, row) => sum + Number(row.amount), 0), 2000)
+})
+
+test("saved expense restores payer from payer_id instead of participant order", () => {
+  const { helpers } = loadExpensePage({})
+  const bill = helpers.hydrateExpense({ id: "expense-1", revision: 1, occurred_at: "2026-09-30", payload: {
+    participants: ["owner", "peer"], expenses: [{ payer_id: "peer", items: [{ item_id: "ticket", name: "门票", amount: { amount: "2000", currency: "JPY" }, allocation: { peer: "1" } }] }],
+  } })
+  assert.equal(bill.payer, "peer")
+  assert.equal(bill.friend, "owner")
 })
 
 test("responsibility summary includes items and shared adjustments", () => {

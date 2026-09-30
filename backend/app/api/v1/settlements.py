@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.v1.trips import _not_found
+from app.api.v1.trips import _not_found, require_trip_member
 from app.core.allocation import Allocation
 from app.core.money import Money
 from app.core.settlement import (
@@ -179,9 +179,7 @@ async def preview_settlement(
         if not isinstance(rows, list) or not rows:
             raise _not_found()
     else:
-        trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
-        if trip is None:
-            raise _not_found()
+        require_trip_member(session, trip_id, user_id)
     expenses = tuple(expense.to_expense(body.settlement_currency) for expense in body.expenses)
     return {"data": _grouped_payload(tuple(body.participants), expenses)}
 

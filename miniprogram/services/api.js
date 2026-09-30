@@ -1,11 +1,12 @@
 const app = getApp()
+let authenticationPromise = null
 
 function authorizationHeader() {
   const accessToken = wx.getStorageSync("access_token")
   return { Authorization: accessToken ? `Bearer ${accessToken}` : "" }
 }
 
-function request(path, options = {}) {
+function rawRequest(path, options = {}) {
   return new Promise((resolve, reject) => {
     wx.request({
       url: `${app.globalData.apiBaseUrl}${path}`,
@@ -14,18 +15,44 @@ function request(path, options = {}) {
       header: { ...authorizationHeader(), ...(options.header || {}) },
       success(response) {
         if (response.statusCode >= 200 && response.statusCode < 300) return resolve(response.data.data)
-        reject(response.data.error || { code: "NETWORK_ERROR", message: "请求未完成" })
+        reject({ ...(response.data && response.data.error || { code: "NETWORK_ERROR", message: "请求未完成" }), statusCode: response.statusCode })
       },
       fail() { reject({ code: "NETWORK_ERROR", message: "网络不可用，请稍后重试" }) }
     })
   })
 }
 
-function login() {
-  return new Promise((resolve, reject) => wx.login({ success: resolve, fail: reject }))
-    .then(({ code }) => request("/v1/auth/wechat", { method: "POST", data: { code } }))
-    .then((tokens) => { wx.setStorageSync("access_token", tokens.access_token); wx.setStorageSync("refresh_token", tokens.refresh_token); return tokens })
+function storeTokens(tokens) {
+  wx.setStorageSync("access_token", tokens.access_token)
+  wx.setStorageSync("refresh_token", tokens.refresh_token)
+  return tokens
 }
+
+function wechatLogin() {
+  return new Promise((resolve, reject) => wx.login({ success: resolve, fail: reject }))
+    .then(({ code }) => rawRequest("/v1/auth/wechat", { method: "POST", data: { code } }))
+    .then(storeTokens)
+}
+
+function ensureAuthenticated(force = false) {
+  if (!force && wx.getStorageSync("access_token")) return Promise.resolve()
+  if (authenticationPromise) return authenticationPromise
+  const refreshToken = wx.getStorageSync("refresh_token")
+  const authenticate = refreshToken
+    ? rawRequest("/v1/auth/refresh", { method: "POST", data: { refresh_token: refreshToken } }).then(storeTokens).catch((error) => error.statusCode === 401 ? wechatLogin() : Promise.reject(error))
+    : wechatLogin()
+  authenticationPromise = authenticate.finally(() => { authenticationPromise = null })
+  return authenticationPromise
+}
+
+function request(path, options = {}) {
+  return rawRequest(path, options).catch((error) => {
+    if (error.statusCode !== 401 || options.authRetried || path.startsWith("/v1/auth/")) throw error
+    return ensureAuthenticated(true).then(() => rawRequest(path, { ...options, authRetried: true }))
+  })
+}
+
+function login() { return ensureAuthenticated(true) }
 
 function createTrip(name, defaultCurrency) { return request("/v1/trips", { method: "POST", data: { name, default_currency: defaultCurrency } }) }
 function getExchangeRate(date, fromCurrency, toCurrency) { return request(`/v1/exchange-rates?date=${encodeURIComponent(date)}&from_currency=${encodeURIComponent(fromCurrency)}&to_currency=${encodeURIComponent(toCurrency)}`) }
@@ -62,4 +89,4 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
+module.exports = { request, login, ensureAuthenticated, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }

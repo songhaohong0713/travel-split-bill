@@ -1,4 +1,4 @@
-const { getTripInvite, acceptTripInvite } = require("../../services/api")
+const { ensureAuthenticated, getTripInvite, acceptTripInvite } = require("../../services/api")
 
 Page({
   data: { token: "", invite: null, loading: true, joining: false, error: "" },
@@ -6,12 +6,12 @@ Page({
     const token = query.token || ""
     if (!token) return this.setData({ loading: false, error: "邀请链接无效" })
     this.setData({ token })
-    getTripInvite(token).then((invite) => this.setData({ invite, loading: false })).catch((error) => this.setData({ loading: false, error: error.message || "邀请已失效" }))
+    return ensureAuthenticated().then(() => getTripInvite(token)).then((invite) => this.setData({ invite, loading: false })).catch((error) => this.setData({ loading: false, error: error.message || "登录或加载邀请失败，请重试" }))
   },
   joinTrip() {
     if (!this.data.token || this.data.joining) return
     this.setData({ joining: true })
-    acceptTripInvite(this.data.token).then(() => {
+    ensureAuthenticated().then(() => acceptTripInvite(this.data.token)).then(() => {
       wx.showToast({ title: "已加入旅行", icon: "success" })
       wx.reLaunch({ url: "/pages/trips/index" })
     }).catch((error) => this.setData({ error: error.message || "加入失败" })).finally(() => this.setData({ joining: false }))

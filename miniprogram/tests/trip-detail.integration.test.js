@@ -9,7 +9,7 @@ function loadTripDetail(api, wx = {}, app = { globalData: {} }) {
   let definition
   vm.runInNewContext(source, {
     Page(value) { definition = value },
-    require() { return api },
+    require(request) { return request.includes("member-labels") ? require("../services/member-labels") : api },
     getApp() { return app },
     wx: { showToast() {}, navigateTo() {}, ...wx },
     Date,
@@ -62,7 +62,7 @@ test("expense summary prioritizes actual payment and keeps the original item sub
   const helpers = (() => {
     const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.js"), "utf8")
     const localModule = { exports: {} }
-    vm.runInNewContext(source, { Page() {}, require() { return {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
+    vm.runInNewContext(source, { Page() {}, require(request) { return request.includes("member-labels") ? require("../services/member-labels") : {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
     return localModule.exports
   })()
   const result = helpers.expenseSummary(record, "CNY")
@@ -122,7 +122,7 @@ test("trip detail shows paid responsibility and pending transfer from settlement
 test("trip detail translates stable member ids into relative labels", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trip-detail", "index.js"), "utf8")
   const localModule = { exports: {} }
-  vm.runInNewContext(source, { Page() {}, require() { return {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
+  vm.runInNewContext(source, { Page() {}, require(request) { return request.includes("member-labels") ? require("../services/member-labels") : {} }, module: localModule, exports: localModule.exports, wx: {}, Date, Math, Promise })
   const helpers = localModule.exports
   const labels = helpers.memberLabels([
     { id: "owner-id", is_current: false },

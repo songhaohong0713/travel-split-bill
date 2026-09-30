@@ -1,4 +1,5 @@
 const { createExpense, getExchangeRate, updateExpense, listExpenses, listTripMembers, previewSettlement, uploadReceipt, getReceiptJob } = require("../../services/api")
+const { memberChoices, memberLabel } = require("../../services/member-labels")
 
 function newItem() {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }
@@ -10,15 +11,6 @@ function allocationFor(item, payer, friend) {
   if (item.allocationMode === "friend") return { [friend]: "1" }
   if (item.allocationMode === "split") return { [payer]: "0.5", [friend]: "0.5" }
   return { [payer]: String(Number(item.payerPercent) / 100), [friend]: String(Number(item.friendPercent) / 100) }
-}
-
-function memberChoices(members) {
-  return (members || []).map((member, index) => ({ id: String(member.id), label: member.is_current ? "我" : (index ? "同行人" : "同行人") }))
-}
-
-function memberLabel(options, id) {
-  const member = (options || []).find((option) => option.id === id)
-  return member ? member.label : id
 }
 
 function cents(value) {
@@ -67,7 +59,9 @@ function hydrateExpense(record) {
   const firstItem = (bill.items || [])[0] || {}
   const adjustment = (bill.adjustments || [])[0] || {}
   const adjustmentTypes = { shared_discount_or_refund: 0, personal_coupon: 1, later_tax_refund: 2 }
-  const [payer = "我", friend = ""] = payload.participants || []
+  const participants = payload.participants || []
+  const payer = bill.payer_id || participants[0] || "我"
+  const friend = participants.find((participant) => participant !== payer) || ""
   const actualPayment = bill.actual_payment && validPositiveAmount(bill.actual_payment.amount) && /^[A-Z]{3}$/.test(String(bill.actual_payment.currency || ""))
     ? bill.actual_payment
     : null
@@ -123,20 +117,27 @@ function billTotal(items, taxAmount, taxIncluded, adjustmentAmount) {
 }
 
 function responsibilityRows(data) {
-  const people = [data.payer, data.friend].filter(Boolean)
+  const people = [...new Set([data.payer, data.friend].filter(Boolean))]
   const totals = Object.fromEntries(people.map((id) => [id, 0]))
+  const addAllocated = (amount, allocation) => {
+    const entries = Object.entries(allocation)
+    let allocated = 0
+    entries.forEach(([id, share], index) => {
+      const value = index === entries.length - 1 ? amount - allocated : Math.round(amount * Number(share))
+      totals[id] = (totals[id] || 0) + value
+      allocated += value
+    })
+  }
   ;(data.items || []).forEach((item) => {
     const amount = cents(item.amount) || 0
-    const allocation = allocationFor(item, data.payer, data.friend)
-    Object.entries(allocation).forEach(([id, share]) => { totals[id] = (totals[id] || 0) + Math.round(amount * Number(share)) })
+    addAllocated(amount, allocationFor(item, data.payer, data.friend))
   })
   if (!data.taxIncluded && data.taxAmount) {
-    const allocation = allocationFor({ allocationMode: "split" }, data.payer, data.friend)
-    Object.entries(allocation).forEach(([id, share]) => { totals[id] = (totals[id] || 0) + Math.round((cents(data.taxAmount) || 0) * Number(share)) })
+    addAllocated(cents(data.taxAmount) || 0, allocationFor({ allocationMode: "split" }, data.payer, data.friend))
   }
   if (data.adjustmentAmount) {
     const allocation = data.adjustmentType === 1 ? { [data.payer]: "1" } : allocationFor({ allocationMode: "split" }, data.payer, data.friend)
-    Object.entries(allocation).forEach(([id, share]) => { totals[id] = (totals[id] || 0) + Math.round((cents(data.adjustmentAmount) || 0) * Number(share)) })
+    addAllocated(cents(data.adjustmentAmount) || 0, allocation)
   }
   return people.map((id) => ({ id, label: memberLabel(data.memberOptions, id), amount: money(totals[id] || 0), currency: data.currency }))
 }
@@ -265,7 +266,7 @@ Page({
     }).catch((error) => wx.showToast({ title: error.message || "读取消费失败", icon: "none" }))
   },
   beginEditing() { this.setData({ reading: false }) },
-  onPayerMember(e) { const payerIndex = Number(e.detail.value); this.syncBill({ payerIndex, payer: this.data.memberOptions[payerIndex].id }) },
+  onPayerMember(e) { const payerIndex = Number(e.detail.value); const payer = this.data.memberOptions[payerIndex].id; const friend = (this.data.memberOptions.find((option) => option.id !== payer) || {}).id || ""; this.syncBill({ payerIndex, payer, friend }) },
   chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); this.startOcr(tempFilePath) } }) }) },
   startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) },
   pollOcr(jobId) { return getReceiptJob(jobId).then((job) => { const failedText = job.error_code === "OCR_TIMEOUT" ? "识别超时，可重试或手动录入" : "识别失败，可手动录入"; const labels = { queued: "排队识别中", processing: "正在识别", failed: failedText }; if (job.status === "needs_review") { const candidates = job.candidates || []; this.setData({ ocrStatus: `识别到 ${candidates.length} 项，等待核对`, ocrCandidates: candidates }); return wx.navigateTo({ url: `/pages/ocr-review/index?candidates=${encodeURIComponent(JSON.stringify(candidates))}`, events: { ocrCandidatesConfirmed: (confirmed) => this.applyOcrCandidates(confirmed) } }) } this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: [] }); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }).catch(() => this.setData({ ocrStatus: "识别状态查询失败，可手动录入" })) },
