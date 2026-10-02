@@ -364,6 +364,10 @@ async def update_expense(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict):
             raise _cloudbase_error(ValueError("invalid CloudBase update response"))
+        if result.get("not_found"):
+            raise _not_found()
+        if not {"id", "revision", "occurred_at", "payload"}.issubset(result):
+            raise _cloudbase_error(ValueError("incomplete CloudBase update response"))
         typed_result = cast(dict[str, Any], result)
         return {
             "data": {
@@ -374,7 +378,7 @@ async def update_expense(
             }
         }
 
-    trip = require_trip_member(session, trip_id, user_id)
+    require_trip_member(session, trip_id, user_id)
     expense = session.scalar(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
@@ -382,8 +386,6 @@ async def update_expense(
         )
     )
     if expense is None:
-        raise _not_found()
-    if expense.owner_id != user_id and trip.owner_id != user_id:
         raise _not_found()
     result = session.execute(
         update(ExpenseRecord)

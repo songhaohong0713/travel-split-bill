@@ -115,7 +115,9 @@ def test_third_user_cannot_read_or_join_full_trip(client: TestClient) -> None:
     assert client.get(f"/v1/trips/{trip_id}/members", headers=auth("third-c")).status_code == 404
 
 
-def test_member_can_manage_only_their_own_expense_and_cannot_invite(client: TestClient) -> None:
+def test_member_can_update_any_expense_but_only_delete_their_own_and_cannot_invite(
+    client: TestClient,
+) -> None:
     trip_id = create_trip(client)
     token = client.post(f"/v1/trips/{trip_id}/invites", headers=auth("owner-a")).json()["data"]["token"]
     assert client.post(f"/v1/trip-invites/{token}/accept", headers=auth("peer-b")).status_code == 200
@@ -125,7 +127,7 @@ def test_member_can_manage_only_their_own_expense_and_cannot_invite(client: Test
     own_id, other_id = own.json()["data"]["id"], other.json()["data"]["id"]
     patch = {"revision": 1, "occurred_at": "2026-09-20", "payload": {"note": "更新"}}
     assert client.patch(f"/v1/trips/{trip_id}/expenses/{own_id}", headers=auth("peer-b"), json=patch).status_code == 200
-    assert client.patch(f"/v1/trips/{trip_id}/expenses/{other_id}", headers=auth("peer-b"), json=patch).status_code == 404
+    assert client.patch(f"/v1/trips/{trip_id}/expenses/{other_id}", headers=auth("peer-b"), json=patch).status_code == 200
     assert client.delete(f"/v1/trips/{trip_id}/expenses/{other_id}", headers=auth("peer-b")).status_code == 404
     assert client.delete(f"/v1/trips/{trip_id}/expenses/{own_id}", headers=auth("peer-b")).status_code == 204
     assert client.post(f"/v1/trips/{trip_id}/invites", headers=auth("peer-b")).status_code == 404

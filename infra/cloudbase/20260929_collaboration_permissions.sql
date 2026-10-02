@@ -16,7 +16,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_tem
 DECLARE v_next_revision integer;
 BEGIN
   IF coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') <> 'service_role' THEN RAISE EXCEPTION 'TSB_FORBIDDEN'; END IF;
-  IF NOT EXISTS (SELECT 1 FROM expenses e JOIN trips t ON t.id=e.trip_id WHERE e.id=p_expense_id AND e.trip_id=p_trip_id AND (e.owner_id=p_owner_id OR t.owner_id=p_owner_id)) THEN RETURN jsonb_build_object('not_found', true); END IF;
+  IF NOT EXISTS (SELECT 1 FROM expenses e JOIN trip_members m ON m.trip_id=e.trip_id WHERE e.id=p_expense_id AND e.trip_id=p_trip_id AND m.user_id=p_owner_id) THEN RETURN jsonb_build_object('not_found', true); END IF;
   UPDATE expenses SET occurred_at=p_occurred_at, payload_json=p_payload, revision=revision+1 WHERE id=p_expense_id AND trip_id=p_trip_id AND revision=p_revision RETURNING revision INTO v_next_revision;
   IF v_next_revision IS NULL THEN RAISE EXCEPTION 'TSB_REVISION_CONFLICT'; END IF;
   RETURN jsonb_build_object('id', p_expense_id, 'revision', v_next_revision, 'occurred_at', p_occurred_at, 'payload', p_payload);

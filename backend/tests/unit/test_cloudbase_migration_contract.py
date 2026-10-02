@@ -47,3 +47,16 @@ def test_trip_ledger_follow_up_defines_owner_delete_rpcs():
     assert "FUNCTION public.tsb_delete_owner_trip" in sql
     assert "owner_id=p_owner_id" in sql
     assert "GRANT EXECUTE ON FUNCTION" in sql
+
+
+def test_collaboration_permissions_allow_trip_members_to_update_any_expense():
+    sql = Path("infra/cloudbase/20260929_collaboration_permissions.sql").read_text(
+        encoding="utf-8"
+    )
+    update_function = sql.split(
+        "CREATE OR REPLACE FUNCTION public.tsb_update_expense_revision", 1
+    )[1].split("CREATE OR REPLACE FUNCTION", 1)[0]
+
+    assert "JOIN trip_members m ON m.trip_id=e.trip_id" in update_function
+    assert "m.user_id=p_owner_id" in update_function
+    assert "e.owner_id=p_owner_id OR t.owner_id=p_owner_id" not in update_function

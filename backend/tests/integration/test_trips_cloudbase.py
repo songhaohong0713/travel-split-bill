@@ -76,6 +76,46 @@ def test_cloudbase_expense_revision_conflict_returns_409(
     assert response.json()["error"]["code"] == "REVISION_CONFLICT"
 
 
+def test_cloudbase_expense_not_found_result_returns_404(
+    client: tuple[TestClient, FakeCloudBasePg],
+) -> None:
+    test_client, provider = client
+
+    async def missing_rpc(name: str, payload: dict[str, object]) -> dict[str, object]:
+        provider.rpc_calls.append((name, payload))
+        return {"not_found": True}
+
+    provider.rpc = missing_rpc  # type: ignore[method-assign]
+    response = test_client.patch(
+        "/v1/trips/trip-1/expenses/expense-1",
+        headers=_headers(),
+        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_cloudbase_expense_malformed_result_returns_503(
+    client: tuple[TestClient, FakeCloudBasePg],
+) -> None:
+    test_client, provider = client
+
+    async def malformed_rpc(name: str, payload: dict[str, object]) -> dict[str, object]:
+        provider.rpc_calls.append((name, payload))
+        return {"revision": 2}
+
+    provider.rpc = malformed_rpc  # type: ignore[method-assign]
+    response = test_client.patch(
+        "/v1/trips/trip-1/expenses/expense-1",
+        headers=_headers(),
+        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "DATABASE_UNAVAILABLE"
+
+
 def test_cloudbase_owner_deletion_uses_delete_rpcs(
     client: tuple[TestClient, FakeCloudBasePg],
 ) -> None:
