@@ -89,4 +89,12 @@ function uploadReceipt(tripId, filePath) {
 }
 
 function getReceiptJob(jobId) { return request(`/v1/receipt-jobs/${jobId}`) }
-module.exports = { request, login, ensureAuthenticated, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob }
+function getLedger(tripId) { return request(`/v1/trips/${tripId}/ledger`) }
+function closeDay(tripId, date) { return request(`/v1/trips/${tripId}/days/${date}/close`, { method: 'POST' }) }
+function previewPayment(tripId, dates = null) { return request(`/v1/trips/${tripId}/payments/preview`, { method: 'POST', data: { dates } }) }
+function markPayment(tripId, data) { return request(`/v1/trips/${tripId}/payments`, { method: 'POST', data }) }
+function revokePayment(tripId, id) { return request(`/v1/trips/${tripId}/payments/${id}/revoke`, { method: 'POST' }) }
+function ledgerSummary() { return request('/v1/trips/ledger-summary') }
+function updateTripDates(tripId, data) { return request(`/v1/trips/${tripId}`, {method:'PATCH',data}) }
+module.exports = { getLedger, closeDay, previewPayment, markPayment, revokePayment, ledgerSummary, updateTripDates }
+Object.assign(module.exports, { request, login, ensureAuthenticated, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob })

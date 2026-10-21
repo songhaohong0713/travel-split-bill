@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.ledger import router as ledger_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.trip_invites import router as trip_invites_router
@@ -61,6 +62,7 @@ def configure_receipt_ai() -> None:
         app.state.receipt_ai = None
 
 app.include_router(auth_router)
+app.include_router(ledger_router)
 app.include_router(trips_router)
 app.include_router(trip_invites_router)
 app.include_router(settlements_router)

@@ -9,17 +9,25 @@
   </view>
   <view wx:else class="expense-editor">
   <view class="masthead">
-    <text class="kicker">TRAVEL SPLIT</text>
+    <text wx:if="{{receiptRecognized}}" class="recognized-pill">✓ 已识别小票，请确认</text>
     <input class="expense-title-input" value="{{title}}" bindinput="onTitle" placeholder="消费名称"/>
-    <picker mode="date" value="{{occurredAt}}" bindchange="onOccurredAt"><view class="expense-date">{{occurredAt || "选择日期"}} ⌄</view></picker>
+    <view class="quick-amount"><text>¥</text><input wx:if="{{items.length === 1}}" type="digit" value="{{items[0].amount}}" placeholder="0.00" bindinput="onQuickAmount"/><text wx:else>{{billTotal}}</text></view>
+    <picker range="{{settlementCurrencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><view class="quick-currency">{{currency}} ⌄</view></picker>
+    <view class="quick-dates"><button size="mini" data-offset="0" bindtap="quickDate">今天</button><button size="mini" data-offset="1" bindtap="quickDate">昨天</button></view>
+    <picker mode="date" value="{{occurredAt}}" bindchange="onOccurredAt"><view class="expense-date">{{occurredAt || "选择日期"}} ⌄ {{dateFromReceipt ? "来自小票" : ""}}</view></picker>
   </view>
   <view class="bill-summary">
+    <view class="expense-trip-row"><text class="field-label">旅行</text><picker wx:if="{{!expenseId && tripOptions.length}}" range="{{tripNames}}" value="{{tripIndex}}" bindchange="onTripSelection"><view>{{tripName}} {{tripOngoing ? '进行中' : ''}} ⌄</view></picker><text wx:else>{{tripName || '当前旅行'}}</text></view>
     <view class="summary-head"><text class="section-title">同行信息</text><text class="summary-note">同行人可留空</text></view>
     <view class="people-grid">
       <view class="person-field"><text class="field-label">付款人</text><picker wx:if="{{memberOptions.length}}" range="{{memberLabels}}" value="{{payerIndex}}" bindchange="onPayerMember"><view class="member-picker">{{payerLabel || "我"}} ⌄</view></picker><input wx:else placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
       <view class="person-field"><text class="field-label">同行人</text><text class="member-readonly">{{friendLabel || "仅付款人"}}</text></view>
     </view>
   </view>
+  <view wx:if="{{friend}}" class="quick-allocation"><text>分摊</text><button size="mini" bindtap="quickSplit">平分</button><button size="mini" bindtap="customSplit">自定义</button></view>
+  <view class="quick-responsibilities"><view wx:for="{{responsibilityRows}}" wx:key="id"><text>{{item.label}}</text><text>{{item.amount}} {{item.currency}}</text></view></view>
+  <view class="more-toggle" bindtap="toggleMore"><text>更多选项</text><text class="small-note">币种换算 · 商品明细 · 账单调整 {{showMore ? '⌃' : '⌄'}}</text></view>
+  <view wx:if="{{showMore}}">
   <view class="receipt-section">
     <view class="receipt-copy"><text class="section-title">票据附件</text><text class="receipt-status">{{ocrStatus}}</text></view>
     <button class="receipt-button" bindtap="chooseReceipt">拍小票，记录消费</button>
@@ -62,11 +70,12 @@
     <view class="adjustment-row"><view><text class="field-label">税额</text><text class="small-note">商品金额{{taxIncluded ? "已含税" : "未含税"}}</text></view><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#123E45"/></view>
     <input class="quiet-input adjustment-input" type="digit" placeholder="填写税额，例如 10" value="{{taxAmount}}" bindinput="onTax"/>
     <view class="adjustment-row"><text class="field-label">优惠 / 退款</text><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="inline-picker">{{adjustmentLabels[adjustmentType]}}⌄</view></picker></view>
-    <input class="quiet-input adjustment-input" placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/>
+    <input class="quiet-input adjustment-input" type="digit" placeholder="填写优惠金额，例如 20" value="{{adjustmentAmount < 0 ? -adjustmentAmount : adjustmentAmount}}" bindinput="onDiscount"/>
   </view></view>
+  </view>
   <view class="checkout-bar">
     <view><text class="checkout-label">{{checkoutLabel}}</text><text class="checkout-total">¥{{checkoutAmount}}</text><text class="checkout-currency">{{checkoutCurrency}}</text></view>
-    <button class="checkout-button" bindtap="saveAndPreview" loading="{{saving}}" disabled="{{saving}}">保存并查看分账</button>
+    <button class="checkout-button" bindtap="saveOnly" loading="{{saving}}" disabled="{{saving}}">保存</button>
   </view>
   </view>
 </view>

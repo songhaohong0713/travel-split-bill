@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, func, select, update
 
 from app.api.dependencies import CurrentUser, DbSession
@@ -18,6 +18,7 @@ from app.db.models import (
     ShareLink,
     Trip,
     TripInvite,
+    TripLedger,
     TripMember,
     User,
 )
@@ -39,6 +40,17 @@ class CreateTripRequest(BaseModel):
 class CreateExpenseRequest(BaseModel):
     occurred_at: date
     payload: dict[str, object]
+
+
+class TripDatesRequest(BaseModel):
+    start_date: date | None = None
+    end_date: date | None = None
+
+    @model_validator(mode='after')
+    def check_dates(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError('结束日期不能早于开始日期')
+        return self
 
 
 class UpdateExpenseRequest(BaseModel):
@@ -71,14 +83,14 @@ def _cloudbase(request: Request) -> CloudBasePgClient | None:
     return getattr(request.app.state, "cloudbase_pg", None)
 
 def require_trip_member(session: DbSession, trip_id: str, user_id: str) -> Trip:
-    trip = session.scalar(select(Trip).join(TripMember).where(Trip.id == trip_id, TripMember.user_id == user_id))
+    trip = session.scalar(select(Trip).join(TripMember).where(Trip.id == trip_id, TripMember.user_id == user_id).with_for_update(of=Trip))
     if trip is None:
         raise _not_found()
     return trip
 
 
 def require_trip_owner(session: DbSession, trip_id: str, user_id: str) -> Trip:
-    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
+    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id).with_for_update())
     if trip is None:
         raise _not_found()
     return trip
@@ -141,6 +153,11 @@ async def list_trips(
         if not isinstance(rows, list):
             raise _cloudbase_error(ValueError("invalid CloudBase trip response"))
         typed_rows = cast(list[dict[str, Any]], rows)
+        try:
+            date_rows = await cloudbase.request('GET', '/trips', params={'id': 'in.(' + ','.join(str(row['id']) for row in typed_rows) + ')', 'select': 'id,start_date,end_date'}) if typed_rows else []
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        dates = {str(row['id']): row for row in date_rows} if isinstance(date_rows, list) else {}
         return {
             "data": [
                 {
@@ -149,13 +166,32 @@ async def list_trips(
                     "default_currency": str(row["default_currency"]),
                     "member_count": int(row.get("member_count", 1)),
                     "is_owner": bool(row.get("is_owner", False)),
+                    'start_date': dates.get(str(row['id']), {}).get('start_date'),
+                    'end_date': dates.get(str(row['id']), {}).get('end_date'),
                 }
                 for row in typed_rows
             ]
         }
 
     trips = session.scalars(select(Trip).join(TripMember).where(TripMember.user_id == user_id).order_by(Trip.created_at, Trip.id)).all()
-    return {"data": [{"id": trip.id, "name": trip.name, "default_currency": trip.default_currency, "member_count": session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip.id)), "is_owner": trip.owner_id == user_id} for trip in trips]}
+    return {"data": [{"id": trip.id, "name": trip.name, "default_currency": trip.default_currency, 'start_date': str(trip.start_date) if trip.start_date else None, 'end_date': str(trip.end_date) if trip.end_date else None, "member_count": session.scalar(select(func.count(TripMember.id)).where(TripMember.trip_id == trip.id)), "is_owner": trip.owner_id == user_id} for trip in trips]}
+
+
+@router.patch('/trips/{trip_id}')
+async def update_trip_dates(trip_id: str, body: TripDatesRequest, request: Request, session: DbSession, user_id: CurrentUser):
+    cloud = _cloudbase(request)
+    if cloud is not None:
+        try:
+            result = await cloud.rpc('tsb_update_trip_dates', {'p_trip_id': trip_id, 'p_user_id': user_id, 'p_start_date': body.start_date.isoformat() if body.start_date else None, 'p_end_date': body.end_date.isoformat() if body.end_date else None})
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get('not_found'):
+            raise _not_found()
+    else:
+        trip = require_trip_owner(session, trip_id, user_id)
+        trip.start_date, trip.end_date = body.start_date, body.end_date
+        session.commit()
+    return {'data': body.model_dump(mode='json')}
 
 
 @router.get("/trips/{trip_id}/members")
@@ -218,7 +254,7 @@ async def list_expenses(
             ]
         }
 
-    trip = require_trip_member(session, trip_id, user_id)
+    require_trip_member(session, trip_id, user_id)
     expenses = session.scalars(
         select(ExpenseRecord)
         .where(ExpenseRecord.trip_id == trip_id)
@@ -291,7 +327,7 @@ async def create_expense(
         persisted = result.get("response", response)
         return JSONResponse(status_code=status.HTTP_201_CREATED, content=persisted)
 
-    trip = require_trip_member(session, trip_id, user_id)
+    require_trip_member(session, trip_id, user_id)
     existing = session.scalar(
         select(IdempotencyRecord).where(
             IdempotencyRecord.owner_id == user_id,
@@ -468,6 +504,7 @@ async def delete_trip(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     require_trip_owner(session, trip_id, user_id)
+    session.execute(delete(TripLedger).where(TripLedger.trip_id == trip_id))
     image_ids = select(ReceiptImage.id).where(ReceiptImage.trip_id == trip_id)
     session.execute(delete(ReceiptJob).where(ReceiptJob.image_id.in_(image_ids)))
     session.execute(delete(ReceiptImage).where(ReceiptImage.trip_id == trip_id))

@@ -1,0 +1,28 @@
+<view class="ledger-page">
+  <view class="ledger-heading"><text class="ledger-title">{{all ? '整段旅行结清' : date}}</text><text class="ledger-muted">{{all ? '当前旅行 · 不含记录中的日期' : name}}</text><text wx:if="{{statusLabel}}" class="ledger-badge">{{statusLabel}}</text></view>
+  <text wx:if="{{loading}}">正在整理账单…</text>
+  <view wx:if="{{error}}" class="ledger-error">{{error}}</view>
+  <view wx:if="{{day.error}}" class="ledger-error">{{day.error}}</view>
+  <view wx:if="{{all}}" class="ledger-card"><text class="ledger-section">结清预览</text><text class="ledger-muted">{{scopeMessage}}</text><view wx:for="{{previewGroups}}" wx:key="currency" class="ledger-transfer"><text>{{item.direction}}</text><text> {{item.amount}} {{item.currency}}</text></view><text class="ledger-muted">涵盖日期</text><text wx:for="{{scopeDates}}" wx:key="*this" class="ledger-muted">{{item}}</text></view>
+  <view wx:if="{{!all}}" class="ledger-card">
+    <text class="ledger-section">剩余待转账</text>
+    <view wx:for="{{pending}}" wx:key="currency" class="ledger-transfer"><text>{{item.text}}</text></view>
+    <text wx:if="{{!pending.length}}" class="ledger-muted">{{day.status === 'recording' ? '结束当天记账后可结清' : day.error ? '补全消费后可计算' : '当前无需转账'}}</text>
+    <button wx:if="{{pending.length === 1}}" class="ledger-secondary" bindtap="copyAmount">复制金额</button>
+  </view>
+  <view wx:for="{{groupRows}}" wx:key="currency" class="ledger-card">
+    <text class="ledger-section">分摊明细 · {{item.currency}}</text>
+    <view class="ledger-table ledger-muted"><text>成员</text><text>实际支付</text><text>应承担</text></view>
+    <view wx:for="{{item.members}}" wx:for-item="person" wx:key="id" class="ledger-table"><text>{{person.name}}</text><text>{{person.paid}}</text><text>{{person.responsibility}}</text></view>
+  </view>
+  <view class="ledger-card"><text class="ledger-section">{{all ? '旅行消费' : '当天消费'}} · {{expenses.length}} 笔</text>
+    <view wx:for="{{expenses}}" wx:key="id" class="ledger-expense" data-id="{{item.id}}" bindtap="openExpense"><view class="ledger-table"><text>{{item.title}}</text><text>{{item.total}} {{item.currency}} ›</text></view><text class="ledger-muted">{{item.date}} · {{item.itemCount}} 项 · {{item.payer}}付 · {{item.amountLabel}}</text><text wx:if="{{item.originalTotal}}" class="ledger-muted">原币合计 {{item.originalTotal}} {{item.originalCurrency}}</text><text wx:if="{{item.canDelete}}" class="danger" data-id="{{item.id}}" catchtap="deleteRecord">删除</text></view>
+  </view>
+  <view wx:if="{{payments.length}}" class="ledger-card"><text class="ledger-section">结清记录</text>
+    <view wx:for="{{payments}}" wx:key="id" class="ledger-history"><text>{{item.direction}} · {{item.amount}} {{item.currency}}</text><text class="ledger-muted">{{item.by}} · {{item.time}} 标记</text><text wx:if="{{item.revoked_at}}" class="ledger-muted">{{item.revokedBy}} · {{item.revokedTime}} 已撤销</text><button wx:else class="ledger-secondary danger" size="mini" data-id="{{item.id}}" bindtap="revoke" disabled="{{busy}}">撤销已转账</button></view>
+  </view>
+  <view class="ledger-bottom">
+    <button wx:if="{{day.status === 'recording'}}" class="ledger-primary" bindtap="endDay" loading="{{busy}}" disabled="{{busy || loading}}">结束当天记账</button>
+    <button wx:elif="{{all || day.status === 'pending'}}" class="ledger-primary" bindtap="confirmPayment" loading="{{busy}}" disabled="{{busy || loading}}">{{all ? '预览并结清当前旅行' : '标记为已转账'}}</button>
+  </view>
+</view>

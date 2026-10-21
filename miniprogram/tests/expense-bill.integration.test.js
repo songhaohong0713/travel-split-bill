@@ -278,7 +278,7 @@ test("expense page distinguishes OCR timeout from a generic failure", () => {
   assert.match(source, /识别超时，可重试或手动录入/)
 })
 
-test("recognized receipt opens batch review before adding items", async () => {
+test("recognized receipt fills confirmation form directly", async () => {
   let navigation
   const api = { getReceiptJob: () => Promise.resolve({ status: "needs_review", candidates: [{ source_text: "お茶", translated_text: "茶", amount: "120", currency: "JPY" }] }) }
   const { definition } = loadExpensePage(api, { navigateTo(options) { navigation = options } })
@@ -288,10 +288,9 @@ test("recognized receipt opens batch review before adding items", async () => {
 
   await instance.pollOcr("job-1")
 
-  assert.match(navigation.url, /pages\/ocr-review\/index/)
-  assert.equal(applied.length, 0)
-  navigation.events.ocrCandidatesConfirmed([{ source_text: "お茶", translated_text: "绿茶", amount: "120", currency: "JPY" }])
-  assert.equal(applied[0].translated_text, "绿茶")
+  assert.equal(navigation, undefined)
+  assert.equal(applied.length, 1)
+  assert.equal(applied[0].translated_text, "茶")
 })
 
 test("saved expense opens in reading mode until edit is requested", async () => {
@@ -574,7 +573,7 @@ test("expense page exposes receipt-book layout hooks", () => {
 test("expense page exposes manual currency selection and explicit save copy", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
   assert.match(wxml, /bindchange="onCurrency"/)
-  assert.match(wxml, /保存并查看分账/)
+  assert.match(wxml, /bindtap="saveOnly"[^>]*>保存</)
 })
 
 test("settlement page exposes settlement-sheet layout hooks", () => {
@@ -598,8 +597,20 @@ test("expense page keeps optional tools collapsed by default", () => {
 
 test("refund adjustment accepts a negative amount on iOS", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "expense", "index.wxml"), "utf8")
-  assert.match(wxml, /placeholder="负数，例如 -20" value="{{adjustmentAmount}}" bindinput="onAdjustment"/)
-  assert.doesNotMatch(wxml, /type="digit" placeholder="负数，例如 -20"/)
+  assert.match(wxml, /type="digit" placeholder="填写优惠金额，例如 20"/)
+  const { definition } = loadExpensePage({})
+  const instance = pageInstance(definition)
+  instance.onDiscount({detail:{value:'20'}})
+  assert.equal(instance.data.adjustmentAmount, '-20')
+})
+
+test('quick bill saves to daily view without publishing a settlement', async () => {
+  let url = ''
+  const {definition} = loadExpensePage({createExpense:async()=>({id:'saved',revision:1,occurred_at:'2026-10-07'})}, {redirectTo(options){url=options.url}})
+  const instance = pageInstance(definition, {tripId:'t',title:'晚餐',payer:'a',friend:'b',currency:'CNY',settlementCurrency:'CNY',items:[{id:'i',name:'',amount:'60',allocationMode:'split'}]})
+  await instance.saveOnly()
+  assert.match(url,/pages\/day-bill\/index\?tripId=t&date=2026-10-07/)
+  assert.equal(instance.data.items[0].name,'晚餐')
 })
 
 test("actual payment input binds an empty fallback and the displayed currency", () => {

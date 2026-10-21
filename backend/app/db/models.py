@@ -50,6 +50,8 @@ class Trip(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
     default_currency: Mapped[str] = mapped_column(String(3))
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     latest_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -63,6 +65,13 @@ class TripMember(Base):
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripLedger(Base):
+    __tablename__ = "trip_ledgers"
+    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    state_json: Mapped[dict[str, object]] = mapped_column(JSON)
 
 
 class TripInvite(Base):

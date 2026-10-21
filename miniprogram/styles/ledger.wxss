@@ -1,0 +1,21 @@
+.ledger-page { padding: 40rpx 44rpx 180rpx; color: #1D1D19; }
+.ledger-heading { margin: 16rpx 0 36rpx; }
+.ledger-title { display: block; font-size: 48rpx; font-weight: 700; margin-bottom: 14rpx; }
+.ledger-muted { display: block; color: #92938A; font-size: 25rpx; line-height: 1.8; }
+.ledger-card { background: #fff; padding: 36rpx; border-radius: 40rpx; margin-bottom: 28rpx; }
+.ledger-section { display: block; font-size: 30rpx; font-weight: 600; margin-bottom: 22rpx; }
+.ledger-badge { display: inline-block; background: #E8F0EC; color: #2F5D50; padding: 8rpx 20rpx; border-radius: 40rpx; font-size: 24rpx; margin-top: 14rpx; }
+.ledger-transfer { background: #F7F5F1; border-radius: 26rpx; padding: 30rpx; font-size: 32rpx; font-weight: 600; margin-bottom: 16rpx; }
+.ledger-table { display: flex; justify-content: space-between; padding: 10rpx 0; font-size: 28rpx; }
+.ledger-table text { flex: 1; text-align: right; }
+.ledger-table text:first-child { text-align: left; }
+.ledger-expense, .ledger-history { padding: 24rpx 0; border-top: 1rpx solid #EDE9E1; }
+.ledger-history > text { display: block; }
+.ledger-primary { color: white; background: #1D1D19; border-radius: 28rpx; font-size: 30rpx; }
+.ledger-secondary { color: #2F5D50; background: #fff; border: 1rpx solid #EDE9E1; border-radius: 24rpx; font-size: 27rpx; margin-top: 16rpx; }
+.ledger-primary::after, .ledger-secondary::after { border: none; }
+.ledger-bottom { position: fixed; left: 44rpx; right: 44rpx; bottom: 0; padding: 20rpx 0 calc(20rpx + env(safe-area-inset-bottom)); background: #F7F5F1; }
+.ledger-error, .danger { color: #C45C40; }
+.ledger-error { padding: 20rpx 0; }
+.ledger-hero { background: #2F5D50; color: white; }
+.ledger-hero .ledger-muted { color: #CEDCD6; }

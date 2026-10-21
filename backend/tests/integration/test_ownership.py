@@ -77,6 +77,8 @@ def test_trip_list_only_returns_current_owners_trips(client: TestClient) -> None
             "id": first_trip_id,
             "name": "东京",
             "default_currency": "CNY",
+                "start_date": None,
+                "end_date": None,
             "member_count": 1,
             "is_owner": True,
         }

@@ -13,11 +13,10 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import select
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.api.v1.trips import _not_found
-from app.db.models import ReceiptImage, ReceiptJob, Trip
+from app.db.models import ReceiptImage, ReceiptJob
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
@@ -67,9 +66,8 @@ async def create_receipt_job(
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
     else:
-        trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
-        if trip is None:
-            raise _not_found()
+        from app.api.v1.trips import require_trip_member
+        require_trip_member(session, trip_id, user_id)
         session.add(ReceiptImage(id=image_id, owner_id=user_id, trip_id=trip_id, object_key=key, status="uploaded"))
         session.add(ReceiptJob(id=job_id, image_id=image_id))
         session.commit()

@@ -1,5 +1,6 @@
 const { createExpense, getExchangeRate, updateExpense, listExpenses, listTripMembers, previewSettlement, uploadReceipt, getReceiptJob } = require("../../services/api")
 const { memberChoices, memberLabel } = require("../../services/member-labels")
+const { listTrips } = require('../../services/api')
 
 function newItem() {
   return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, name: "", amount: "", selected: false, allocationMode: "payer", payerPercent: "100", friendPercent: "0" }
@@ -231,7 +232,7 @@ function settlementUrl(tripId, preview, result) {
 function draftKey(tripId) { return `travel-split:expense-draft:${tripId}` }
 
 Page({
-  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", settlementCurrency: "CNY", settlementCurrencies: ["CNY", "JPY", "USD", "KRW"], settlementCurrencyIndex: 0, settlementCurrencyLocked: false, actualPaymentAmount: "", actualPaymentCurrency: "", actualPaymentCurrencyIndex: 0, referenceRate: "", referenceRateSource: "", rateEffectiveDate: "", rateStatus: "", estimatedSettlementAmount: "", checkoutLabel: "本次应付", checkoutAmount: "0.00", checkoutCurrency: "CNY", items: [newItem()], payer: "我", friend: "", memberOptions: [], memberLabels: [], payerIndex: 0, responsibilityRows: [], batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", batchEditing: false, showBatchTools: false, showAdjustments: false, expandedItemId: "", reading: false },
+  data: { tripId: "", expenseId: "", expensePayloadId: "", revision: 0, occurredAt: "", title: "", currency: "CNY", settlementCurrency: "CNY", settlementCurrencies: ["CNY", "JPY", "USD", "KRW"], settlementCurrencyIndex: 0, settlementCurrencyLocked: false, actualPaymentAmount: "", actualPaymentCurrency: "", actualPaymentCurrencyIndex: 0, referenceRate: "", referenceRateSource: "", rateEffectiveDate: "", rateStatus: "", estimatedSettlementAmount: "", checkoutLabel: "本次应付", checkoutAmount: "0.00", checkoutCurrency: "CNY", items: [newItem()], payer: "我", friend: "", memberOptions: [], memberLabels: [], payerIndex: 0, responsibilityRows: [], batchModeIndex: 0, batchModes: ["付款人自己买", "同行人自己买", "两人均分", "自定义比例"], batchPayerPercent: "50", batchFriendPercent: "50", receiptPath: "", ocrCandidates: [], taxAmount: "", taxIncluded: true, adjustmentAmount: "", adjustmentType: 0, adjustmentLabels: ["公共优惠 / 退款", "个人优惠", "后续退税"], ocrStatus: "未上传", saving: false, selectedCount: 0, billTotal: "0.00", sourceText: "", translatedText: "", amount: "", batchEditing: false, showBatchTools: false, showAdjustments: false, showMore: false, expandedItemId: "", reading: false },
   syncBill(changes = {}) {
     const next = { ...this.data, ...changes }
     const nextBillTotal = billTotal(next.items, next.taxAmount, next.taxIncluded, next.adjustmentAmount)
@@ -243,7 +244,8 @@ Page({
     if (next.tripId && !next.expenseId && wx.setStorageSync) wx.setStorageSync(draftKey(next.tripId), { ...next, receiptPath: "" })
   },
   onLoad(q) {
-    const occurredAt = new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    const occurredAt = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
     const app = getApp()
     const receiptPath = q.receiptPath || app.globalData.pendingReceiptPath || ""
     app.globalData.pendingReceiptPath = ""
@@ -253,9 +255,19 @@ Page({
       const memberOptions = memberChoices(members)
       const current = memberOptions.find((option, index) => members[index] && members[index].is_current) || memberOptions[0]
       const payer = q.expenseId ? this.data.payer : (current && current.id || this.data.payer)
+      if (!q.expenseId && !draft && memberOptions.length === 2) this.syncBill({items:this.data.items.map(item=>({...item,allocationMode:'split',payerPercent:'50',friendPercent:'50'}))})
       this.syncBill({ memberOptions, memberLabels: memberOptions.map((option) => option.label), payer, friend: q.expenseId ? this.data.friend : (memberOptions.find((option) => !current || option.id !== current.id) || {}).id || "", payerIndex: Math.max(0, memberOptions.findIndex((option) => option.id === payer)) })
     }).catch(() => {}) : Promise.resolve()
-    return membersLoaded.then(() => q.expenseId ? this.loadExpense(q.expenseId) : null).then(() => { if (receiptPath) this.startOcr(receiptPath) })
+    const tripsLoaded = typeof listTrips === 'function' ? listTrips().then(trips=>{
+      const tripIndex=Math.max(0,trips.findIndex(trip=>trip.id === q.tripId))
+      const current=trips.find(trip=>trip.id === q.tripId)
+      this.setData({tripOptions:trips,tripNames:trips.map(trip=>trip.name),tripIndex,tripName:current ? current.name : '当前旅行',tripOngoing:current && current.start_date && current.end_date && current.start_date <= occurredAt && current.end_date >= occurredAt})
+    }).catch(error=>this.setData({tripName:'当前旅行',tripLoadError:error.message || '暂时无法选择旅行'})) : Promise.resolve()
+    return Promise.all([membersLoaded,tripsLoaded]).then(() => q.expenseId ? this.loadExpense(q.expenseId) : null).then(() => { if (receiptPath) this.startOcr(receiptPath) })
+  },
+  onTripSelection(e) {
+    const trip=this.data.tripOptions[Number(e.detail.value)]
+    if (trip && trip.id !== this.data.tripId) wx.redirectTo({url:`/pages/expense/index?tripId=${encodeURIComponent(trip.id)}&currency=${trip.default_currency}`})
   },
   loadExpense(expenseId) {
     return listExpenses(this.data.tripId).then((records) => {
@@ -269,9 +281,40 @@ Page({
   onPayerMember(e) { const payerIndex = Number(e.detail.value); const payer = this.data.memberOptions[payerIndex].id; const friend = (this.data.memberOptions.find((option) => option.id !== payer) || {}).id || ""; this.syncBill({ payerIndex, payer, friend }) },
   chooseReceipt() { wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => wx.compressImage({ src: tempFiles[0].tempFilePath, quality: 80, success: ({ tempFilePath }) => { this.setData({ receiptPath: tempFilePath, ocrStatus: "等待上传识别" }); this.startOcr(tempFilePath) } }) }) },
   startOcr(filePath) { this.setData({ ocrStatus: "上传并识别中" }); uploadReceipt(this.data.tripId, filePath).then((job) => this.pollOcr(job.id)).catch(() => this.setData({ ocrStatus: "上传或识别失败，可手动录入" })) },
-  pollOcr(jobId) { return getReceiptJob(jobId).then((job) => { const failedText = job.error_code === "OCR_TIMEOUT" ? "识别超时，可重试或手动录入" : "识别失败，可手动录入"; const labels = { queued: "排队识别中", processing: "正在识别", failed: failedText }; if (job.status === "needs_review") { const candidates = job.candidates || []; this.setData({ ocrStatus: `识别到 ${candidates.length} 项，等待核对`, ocrCandidates: candidates }); return wx.navigateTo({ url: `/pages/ocr-review/index?candidates=${encodeURIComponent(JSON.stringify(candidates))}`, events: { ocrCandidatesConfirmed: (confirmed) => this.applyOcrCandidates(confirmed) } }) } this.setData({ ocrStatus: labels[job.status] || job.status, ocrCandidates: [] }); if (job.status === "queued" || job.status === "processing") setTimeout(() => this.pollOcr(jobId), 1500) }).catch(() => this.setData({ ocrStatus: "识别状态查询失败，可手动录入" })) },
+  pollOcr(jobId) {
+    return getReceiptJob(jobId).then(job => {
+      if (this.ocrStopped) return
+      if (job.status === "needs_review") {
+        this.setData({receiptRecognized:true, ocrStatus:"已识别小票，请确认"})
+        return this.applyOcrCandidates(job.candidates || [])
+      }
+      const labels = {queued:"排队识别中", processing:"正在识别", failed:job.error_code === "OCR_TIMEOUT" ? "识别超时，可重试或手动录入" : "识别失败，可手动录入"}
+      this.setData({ocrStatus:labels[job.status] || job.status})
+      if (job.status === "queued" || job.status === "processing") this.ocrTimer = setTimeout(() => this.pollOcr(jobId),1500)
+    }).catch(() => this.setData({ocrStatus:"识别状态查询失败，可手动录入"}))
+  },
+  onUnload() { this.ocrStopped = true; if (this.ocrTimer) clearTimeout(this.ocrTimer) },
+  toggleMore() { this.setData({showMore:!this.data.showMore}) },
+  onQuickAmount(e) { if (this.data.items.length === 1) this.updateItem(this.data.items[0].id,'amount',e.detail.value) },
+  quickSplit() { this.syncBill({items:this.data.items.map(item => ({...item,allocationMode:'split',payerPercent:'50',friendPercent:'50'}))}) },
+  customSplit() { this.setData({showMore:true}) },
+  quickDate(e) {
+    const now = new Date()
+    now.setDate(now.getDate() - Number(e.currentTarget.dataset.offset || 0))
+    return this.onOccurredAt({detail:{value:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`}})
+  },
+  onDiscount(e) {
+    const value = String(e.detail.value || '').replace(/^-/, '')
+    this.syncBill({adjustmentAmount:value ? '-' + value : ''})
+    return {value}
+  },
   applyOcrCandidates(candidates) {
-    const recognized = (candidates || []).map((candidate) => ({ ...newItem(), name: String(candidate.translated_text || candidate.source_text || "").trim(), amount: String(candidate.amount || "").trim(), currency: String(candidate.currency || "").trim().toUpperCase() })).filter((item) => item.name && Number.isFinite(cents(item.amount)) && cents(item.amount) > 0)
+    const metadata = (candidates || []).find(c => c.occurred_at || c.merchant) || {}
+    const changes = {}
+    if (metadata.occurred_at && !this.data.dateManuallyChanged) { changes.occurredAt = metadata.occurred_at; changes.dateFromReceipt = true }
+    if (metadata.merchant && !this.data.titleManuallyChanged) changes.title = metadata.merchant
+    if (Object.keys(changes).length) this.syncBill(changes)
+    const recognized = (candidates || []).map((candidate) => ({ ...newItem(), allocationMode:this.data.friend ? 'split' : 'payer', name: String(candidate.translated_text || candidate.source_text || "").trim(), amount: String(candidate.amount || "").trim(), currency: String(candidate.currency || "").trim().toUpperCase() })).filter((item) => item.name && Number.isFinite(cents(item.amount)) && cents(item.amount) > 0)
     if (!recognized.length) return this.setData({ ocrCandidates: [], ocrStatus: "未识别到有效商品，请手动录入" })
     const starterIsBlank = this.data.items.length === 1 && !String(this.data.items[0].name || "").trim() && !String(this.data.items[0].amount || "").trim()
     const items = starterIsBlank ? recognized : [...this.data.items, ...recognized]
@@ -292,7 +335,7 @@ Page({
       .catch(() => this.syncBill({ referenceRate: "", referenceRateSource: "", rateEffectiveDate: "", rateStatus: "failed" }))
   },
   toggleAdjustments() { this.setData({ showAdjustments: !this.data.showAdjustments }) },
-  onTitle(e) { this.syncBill({ title: e.detail.value }) }, onOccurredAt(e) { this.syncBill({ occurredAt: e.detail.value }); return this.refreshRate() }, onPayer(e) { this.syncBill({ payer: e.detail.value }) }, onFriend(e) { this.syncBill({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.syncBill({ adjustmentType: Number(e.detail.value) }) },
+  onTitle(e) { this.syncBill({ title: e.detail.value, titleManuallyChanged:true }) }, onOccurredAt(e) { this.syncBill({ occurredAt: e.detail.value, dateManuallyChanged:true, dateFromReceipt:false }); return this.refreshRate() }, onPayer(e) { this.syncBill({ payer: e.detail.value }) }, onFriend(e) { this.syncBill({ friend: e.detail.value }) }, onTaxIncluded(e) { this.syncBill({ taxIncluded: e.detail.value }) }, onTax(e) { this.syncBill({ taxAmount: e.detail.value }) }, onAdjustment(e) { this.syncBill({ adjustmentAmount: e.detail.value }) }, onAdjustmentType(e) { this.syncBill({ adjustmentType: Number(e.detail.value) }) },
   onCurrency(e) { this.syncBill({ currency: this.data.settlementCurrencies[Number(e.detail.value)] }); return this.refreshRate() },
   onSettlementCurrency(e) { if (this.data.settlementCurrencyLocked) return; this.syncBill({ settlementCurrency: this.data.settlementCurrencies[Number(e.detail.value)] }); return this.refreshRate() },
   onActualPaymentAmount(e) {
@@ -322,7 +365,9 @@ Page({
     if (allocationMode === "custom" && Number(this.data.batchPayerPercent) + Number(this.data.batchFriendPercent) !== 100) return wx.showToast({ title: "自定义比例合计必须为 100%", icon: "none" })
     this.syncBill({ items: this.data.items.map((item) => item.selected ? { ...item, allocationMode, payerPercent: this.data.batchPayerPercent, friendPercent: this.data.batchFriendPercent } : item) })
   },
+  saveOnly() { this.setData({afterSaveDaily:true}); return this.saveAndPreview() },
   saveAndPreview() {
+    if (this.data.items.length === 1 && !this.data.items[0].name.trim()) this.syncBill({items:[{...this.data.items[0],name:this.data.title || "消费"}]})
     const error = validateBill(this.data)
     if (error) return Promise.resolve(wx.showToast({ title: error, icon: "none" }))
     const previewPayload = buildBillPayload(this.data)
@@ -332,9 +377,9 @@ Page({
       : createExpense(this.data.tripId, this.data.occurredAt, previewPayload)
     const wasEditing = Boolean(this.data.expenseId)
     return save
-      .then((saved) => { if (wx.removeStorageSync) wx.removeStorageSync(draftKey(this.data.tripId)); this.syncBill({ expenseId: saved.id, revision: saved.revision, occurredAt: saved.occurred_at }); if (wasEditing) { wx.navigateBack(); return null } return listExpenses(this.data.tripId).then((records) => records.map((record) => record.id === saved.id ? saved : record)) })
+      .then((saved) => { if (wx.removeStorageSync) wx.removeStorageSync(draftKey(this.data.tripId)); this.syncBill({ expenseId: saved.id, revision: saved.revision, occurredAt: saved.occurred_at }); if (wasEditing) { wx.navigateBack(); return null } if (this.data.afterSaveDaily) { wx.redirectTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${saved.occurred_at}`}); return null } return listExpenses(this.data.tripId).then((records) => records.map((record) => record.id === saved.id ? saved : record)) })
       .then((records) => {
-        if (wasEditing) return null
+        if (wasEditing || !records) return null
         const tripPreview = buildTripPreview(records, this.data.currency)
         if (!tripPreview) throw new Error("请先统一每笔消费的两位同行人")
         return previewSettlement(this.data.tripId, tripPreview).then((result) => ({ result, tripPreview }))

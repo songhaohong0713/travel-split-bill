@@ -1,5 +1,6 @@
 const { createTripInvite, deleteExpense, deleteTrip, listExpenses, listTripMembers, previewSettlement } = require("../../services/api")
 const { memberLabelMap } = require("../../services/member-labels")
+const { getLedger, listTrips, updateTripDates } = require('../../services/api')
 
 function confirmDelete(content) {
   return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
@@ -15,14 +16,7 @@ function decodeQueryText(value) {
 
 const memberLabels = memberLabelMap
 
-function expenseSummary(record, currency, labels = {}) {
-  const bill = (record.payload.expenses || [])[0] || {}
-  const items = bill.items || []
-  const total = items.reduce((sum, item) => sum + Math.round(Number(item.amount && item.amount.amount) * 100 || 0), 0)
-  const itemCurrency = items[0] && items[0].amount && items[0].amount.currency || currency
-  const actualPayment = bill.actual_payment && validAmount(bill.actual_payment.amount) ? bill.actual_payment : null
-  return { id: record.id, revision: record.revision, occurredAt: record.occurred_at, title: record.payload.title || "未命名消费", payer: labels[bill.payer_id] || bill.payer_id || "", itemCount: items.length, amountLabel: actualPayment ? "实际支付" : "商品小计", total: actualPayment ? actualPayment.amount : (total / 100).toFixed(2), currency: actualPayment ? actualPayment.currency : itemCurrency, originalTotal: actualPayment ? (total / 100).toFixed(2) : "", originalCurrency: actualPayment ? itemCurrency : "", isCreator: Boolean(record.is_creator) }
-}
+const { expenseSummary } = require('../../services/expense-summary')
 
 function buildOverview(records, currency) {
   const summaries = records.map((record) => expenseSummary(record, currency))
@@ -66,13 +60,27 @@ Page({
   onLoad(query) {
     this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: decodeQueryText(query.name) || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
     const members = typeof listTripMembers === "function" ? listTripMembers(query.tripId).then((rows) => this.setData({ memberLabelMap: memberLabels(rows) })).catch(() => {}) : Promise.resolve()
-    return members.then(() => this.loadExpenses()).then(() => this.setData({ hasLoaded: true }))
+    return members.then(() => this.loadExpenses()).then(() => {
+      this.setData({ hasLoaded: true })
+      if (typeof listTrips === 'function') return listTrips().then(trips => {
+        const trip = trips.find(t => t.id === this.data.tripId)
+        if (trip) this.setData({startDate:trip.start_date || '',endDate:trip.end_date || '',isOwner:trip.is_owner,memberCount:trip.member_count})
+      }).catch(error => this.setData({dateError:error.message || '无法读取旅行日期'}))
+    })
   },
   onShow() { return this.data.hasLoaded ? this.loadExpenses() : Promise.resolve() },
   loadExpenses() {
     return listExpenses(this.data.tripId)
       .then((records) => {
         this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency, this.data.memberLabelMap)), overview: buildOverview(records, this.data.currency), settlementGroups: [], settlementWarning: "", loading: false, loadError: "" })
+        if (typeof getLedger === 'function') {
+          return getLedger(this.data.tripId).then(ledger => {
+            const labels = this.data.memberLabelMap
+            const describe = p => `${labels[p.from_participant_id] || '同行人'} 需付给 ${labels[p.to_participant_id] || '同行人'} ${p.amount} ${p.currency}`
+            this.setData({ dailyLedger: true, summaryText:(ledger.summary || []).filter(g => !g.offset_only).map(describe).join('；') || '当前无需转账', summaryIncomplete:ledger.summary_incomplete, days: ledger.days.map(day => ({...day, statusLabel: {recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status], pendingText: day.pending.map(describe).join('；') || (day.error ? '需补全消费' : '当前无需转账')})), memberCount: ledger.members.length, ledgerError: '' })
+            return records
+          }).catch(error => { this.setData({dailyLedger:true,ledgerError:error.message || '暂时无法读取每日账单'}); return records })
+        }
         const preview = buildSettlementPreview(records, this.data.currency)
         if (!preview || typeof previewSettlement !== "function") {
           if (records.length) this.setData({ settlementWarning: "补全同行人、分摊或汇率后可查看结算" })
@@ -87,6 +95,17 @@ Page({
   openExpense(event) {
     const { id } = event.currentTarget.dataset
     wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(id)}` })
+  },
+  openDay(e) { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${e.currentTarget.dataset.date}&name=${encodeURIComponent(this.data.name)}`}) },
+  settleTrip() { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&name=${encodeURIComponent(this.data.name)}`}) },
+  onTripStart(e) { this.setData({startDate:e.detail.value}) },
+  onTripEnd(e) { this.setData({endDate:e.detail.value}) },
+  saveTripDates() {
+    if (this.data.savingDates) return Promise.resolve()
+    if (this.data.startDate && this.data.endDate && this.data.startDate > this.data.endDate) return wx.showToast({title:'结束日期不能早于开始日期',icon:'none'})
+    this.setData({savingDates:true,dateError:''})
+    return updateTripDates(this.data.tripId,{start_date:this.data.startDate || null,end_date:this.data.endDate || null})
+      .then(() => wx.showToast({title:'日期已保存',icon:'success'})).catch(error => this.setData({dateError:error.message || '日期保存失败'})).finally(() => this.setData({savingDates:false}))
   },
   chooseReceiptAndCreate() {
     if (this.data.creating) return Promise.resolve()
