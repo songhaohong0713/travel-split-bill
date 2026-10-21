@@ -40,6 +40,7 @@ Page({
       .catch(() => this.setData({ loadingTrips: false, loadError: "暂时无法读取旅行记录" }))
   },
   onName(e) { this.setData({ name: e.detail.value }) },
+  onTravelDates(e) { this.setData({startDate:e.detail.start,endDate:e.detail.end}) },
   onStartDate(e) { this.setData({startDate:e.detail.value}) },
   onEndDate(e) { this.setData({endDate:e.detail.value}) },
   onCurrency(e) { this.setData({ currency: this.data.currencies[e.detail.value] }) },

@@ -1,0 +1,12 @@
+<view bindtap="open"><slot/></view>
+<view wx:if="{{visible}}" class="calendar-mask" catchtap="close" catchtouchmove="stop">
+  <view class="calendar-sheet" catchtap="stop">
+    <view class="calendar-heading"><text>{{mode === 'range' ? '选择出行日期' : '选择消费日期'}}</text><button class="calendar-close" bindtap="close">关闭</button></view>
+    <view class="calendar-selection">{{mode === 'range' ? (draftStart || '开始日期') + ' — ' + (draftEnd || '结束日期') : (draftValue || '请选择日期')}}</view>
+    <view class="calendar-month"><button data-delta="-12" bindtap="move">«</button><button data-delta="-1" bindtap="move">‹</button><text>{{year}} 年 {{month}} 月</text><button data-delta="1" bindtap="move">›</button><button data-delta="12" bindtap="move">»</button></view>
+    <view class="calendar-grid"><text wx:for="{{weekdays}}" wx:key="*this" class="calendar-week">{{item}}</text></view>
+    <view class="calendar-grid"><view wx:for="{{days}}" wx:key="key" class="calendar-day {{item.inside ? 'in-range' : ''}} {{item.selected ? 'selected' : ''}} {{item.today ? 'today' : ''}}" data-value="{{item.value}}" bindtap="choose">{{item.day}}</view></view>
+    <text class="calendar-hint">{{mode === 'range' ? awaitingEnd ? '再点一天作为结束日期' : '先点开始日期，再点结束日期' : '点击日期后确认'}}</text>
+    <button class="calendar-confirm" disabled="{{mode === 'range' ? !draftStart || !draftEnd : !draftValue}}" bindtap="confirm">确认日期</button>
+  </view>
+</view>

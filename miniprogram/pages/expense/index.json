@@ -1,1 +1,1 @@
-{"navigationBarTitleText":"录入消费"}
+{"navigationBarTitleText": "录入消费", "usingComponents": {"calendar-picker": "../../components/calendar-picker/index"}}

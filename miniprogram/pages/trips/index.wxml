@@ -5,7 +5,6 @@
     <text class="subtitle">下一笔，记到哪段旅程？</text>
   </view>
   <view wx:if="{{summaryGroups.length}}" class="home-settlement"><text class="section-title">累计待结清</text><view wx:for="{{summaryGroups}}" wx:key="currency" class="home-balance"><text>{{item.currency}}</text><text>待收 {{item.receivable}}</text><text>待付 {{item.payable}}</text></view><text class="section-note">不含记录中 · 不跨旅行抵扣</text></view>
-  <text wx:if="{{summaryError}}" class="load-error">{{summaryError}}</text>
   <view wx:if="{{loadError}}" class="load-error"><text>{{loadError}}</text></view>
   <view wx:if="{{loadingTrips}}" class="loading-trips"><text>正在整理旅行账本…</text></view>
   <view wx:elif="{{trips.length}}" class="trip-list">
@@ -26,7 +25,7 @@
     <view wx:if="{{showCreateForm || !trips.length}}" class="create-form">
       <text class="field-label">旅行名称</text>
       <input placeholder="例如：东京周末" value="{{name}}" bindinput="onName"/>
-      <text class="field-label">出行日期（可选）</text><view class="home-dates"><picker mode="date" value="{{startDate}}" bindchange="onStartDate"><view>{{startDate || '开始日期'}}</view></picker><text>—</text><picker mode="date" value="{{endDate}}" bindchange="onEndDate"><view>{{endDate || '结束日期'}}</view></picker></view>
+      <text class="field-label">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates"><view class="home-dates"><view>{{startDate || '开始日期'}}</view><text>—</text><view>{{endDate || '结束日期'}}</view></view></calendar-picker>
       <view class="currency-row"><text class="field-label">结算币种</text><picker range="{{currencies}}" bindchange="onCurrency"><view class="currency-picker">{{currency}}<text>⌄</text></view></picker></view>
       <button class="create-button" bindtap="createTrip" loading="{{creating}}" disabled="{{creating}}">创建并录入消费</button>
     </view>

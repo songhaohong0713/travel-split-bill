@@ -98,6 +98,7 @@ Page({
   },
   openDay(e) { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${e.currentTarget.dataset.date}&name=${encodeURIComponent(this.data.name)}`}) },
   settleTrip() { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&name=${encodeURIComponent(this.data.name)}`}) },
+  onTravelDates(e) { this.setData({startDate:e.detail.start,endDate:e.detail.end}) },
   onTripStart(e) { this.setData({startDate:e.detail.value}) },
   onTripEnd(e) { this.setData({endDate:e.detail.value}) },
   saveTripDates() {
