@@ -1,4 +1,10 @@
-<view bindtap="open"><slot/></view>
+<view class="calendar-trigger" bindtap="open">
+  <view wx:if="{{mode === 'range'}}" class="calendar-range {{compact ? 'compact' : ''}}">
+    <view class="calendar-date-row"><text>开始日期</text><text class="date-value">{{start || '待选择'}} ›</text></view>
+    <view class="calendar-date-row"><text>结束日期</text><text class="date-value">{{end || '待选择'}} ›</text></view>
+  </view>
+  <view wx:else class="calendar-single">{{value || '选择日期'}} ⌄ <text>{{hint}}</text></view>
+</view>
 <view wx:if="{{visible}}" class="calendar-mask" catchtap="close" catchtouchmove="stop">
   <view class="calendar-sheet" catchtap="stop">
     <view class="calendar-heading"><text>{{mode === 'range' ? '选择出行日期' : '选择消费日期'}}</text><button class="calendar-close" bindtap="close">关闭</button></view>

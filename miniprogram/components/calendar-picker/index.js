@@ -18,7 +18,7 @@ function selectRange(state,value) {
 
 
 Component({
-  properties:{mode:{type:String,value:'single'},value:String,start:String,end:String},
+  properties:{mode:{type:String,value:'single'},value:String,start:String,end:String,hint:String,compact:Boolean},
   data:{visible:false,year:0,month:0,days:[],weekdays:['日','一','二','三','四','五','六'],draftValue:'',draftStart:'',draftEnd:'',awaitingEnd:false},
   methods:{
     open() {

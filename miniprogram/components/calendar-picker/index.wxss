@@ -1,4 +1,11 @@
 :host {display:block;}
+.calendar-trigger {padding:12rpx 0;color:#92938A;font-size:26rpx;line-height:1.8;text-align:left;}
+.calendar-date-row {display:flex;justify-content:space-between;gap:16rpx;padding:12rpx 0;}
+.date-value {color:#2F5D50;}
+.calendar-range.compact {display:flex;justify-content:space-between;gap:24rpx;}
+.compact .calendar-date-row {display:flex;flex-direction:column;gap:6rpx;}
+.calendar-single {text-align:center;}
+.calendar-single text {color:#2F5D50;font-size:24rpx;}
 .calendar-mask {position:fixed;top:0;right:0;bottom:0;left:0;z-index:10000;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;}
 .calendar-sheet {width:100%;box-sizing:border-box;background:#F7F5F1;border-radius:36rpx 36rpx 0 0;padding:30rpx 32rpx calc(26rpx + env(safe-area-inset-bottom));color:#1D1D19;text-align:left;}
 .calendar-heading {display:flex;align-items:center;justify-content:space-between;font-size:32rpx;font-weight:600;}

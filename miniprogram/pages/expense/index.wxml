@@ -14,7 +14,7 @@
     <view class="quick-amount"><text>¥</text><input wx:if="{{items.length === 1}}" type="digit" value="{{items[0].amount}}" placeholder="0.00" bindinput="onQuickAmount"/><text wx:else>{{billTotal}}</text></view>
     <picker range="{{settlementCurrencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><view class="quick-currency">{{currency}} ⌄</view></picker>
     <view class="quick-dates"><button size="mini" data-offset="0" bindtap="quickDate">今天</button><button size="mini" data-offset="1" bindtap="quickDate">昨天</button></view>
-    <calendar-picker value="{{occurredAt}}" bindselect="onOccurredAt"><view class="expense-date">{{occurredAt || "选择日期"}} ⌄ {{dateFromReceipt ? "来自小票" : ""}}</view></calendar-picker>
+    <calendar-picker value="{{occurredAt}}" hint="{{dateFromReceipt ? '来自小票' : ''}}" bindselect="onOccurredAt"/>
   </view>
   <view class="bill-summary">
     <view class="expense-trip-row"><text class="field-label">旅行</text><picker wx:if="{{!expenseId && tripOptions.length}}" range="{{tripNames}}" value="{{tripIndex}}" bindchange="onTripSelection"><view>{{tripName}} {{tripOngoing ? '进行中' : ''}} ⌄</view></picker><text wx:else>{{tripName || '当前旅行'}}</text></view>

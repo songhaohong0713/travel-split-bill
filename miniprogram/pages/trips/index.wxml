@@ -25,7 +25,7 @@
     <view wx:if="{{showCreateForm || !trips.length}}" class="create-form">
       <text class="field-label">旅行名称</text>
       <input placeholder="例如：东京周末" value="{{name}}" bindinput="onName"/>
-      <text class="field-label">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates"><view class="home-dates"><view>{{startDate || '开始日期'}}</view><text>—</text><view>{{endDate || '结束日期'}}</view></view></calendar-picker>
+      <text class="field-label">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates" compact="{{true}}"/>
       <view class="currency-row"><text class="field-label">结算币种</text><picker range="{{currencies}}" bindchange="onCurrency"><view class="currency-picker">{{currency}}<text>⌄</text></view></picker></view>
       <button class="create-button" bindtap="createTrip" loading="{{creating}}" disabled="{{creating}}">创建并录入消费</button>
     </view>
