@@ -56,7 +56,7 @@ function settlementGroups(result, participants, labels = {}) {
 }
 
 Page({
-  data: { tripId: "", currency: "CNY", name: "", isOwner: false, memberLabelMap: {}, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, settlementGroups: [], settlementWarning: "", hasLoaded: false, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
+  data: { startDate:"", endDate:"", dateError:"", tripId: "", currency: "CNY", name: "", isOwner: false, memberLabelMap: {}, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, settlementGroups: [], settlementWarning: "", hasLoaded: false, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
   onLoad(query) {
     this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: decodeQueryText(query.name) || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
     const members = typeof listTripMembers === "function" ? listTripMembers(query.tripId).then((rows) => this.setData({ memberLabelMap: memberLabels(rows) })).catch(() => {}) : Promise.resolve()
@@ -65,7 +65,7 @@ Page({
       if (typeof listTrips === 'function') return listTrips().then(trips => {
         const trip = trips.find(t => t.id === this.data.tripId)
         if (trip) this.setData({startDate:trip.start_date || '',endDate:trip.end_date || '',isOwner:trip.is_owner,memberCount:trip.member_count})
-      }).catch(error => this.setData({dateError:error.message || '无法读取旅行日期'}))
+      }).catch(() => this.setData({dateLoadError:true}))
     })
   },
   onShow() { return this.data.hasLoaded ? this.loadExpenses() : Promise.resolve() },
@@ -106,7 +106,7 @@ Page({
     if (this.data.startDate && this.data.endDate && this.data.startDate > this.data.endDate) return wx.showToast({title:'结束日期不能早于开始日期',icon:'none'})
     this.setData({savingDates:true,dateError:''})
     return updateTripDates(this.data.tripId,{start_date:this.data.startDate || null,end_date:this.data.endDate || null})
-      .then(() => wx.showToast({title:'日期已保存',icon:'success'})).catch(error => this.setData({dateError:error.message || '日期保存失败'})).finally(() => this.setData({savingDates:false}))
+      .then(() => wx.showToast({title:'日期已保存',icon:'success'})).catch(() => this.setData({dateError:'日期暂未保存，请稍后重试'})).finally(() => this.setData({savingDates:false}))
   },
   chooseReceiptAndCreate() {
     if (this.data.creating) return Promise.resolve()

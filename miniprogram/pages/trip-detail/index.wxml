@@ -32,6 +32,6 @@
   <view class="actions"><button class="primary" bindtap="chooseReceiptAndCreate" loading="{{creating}}" disabled="{{creating}}">拍小票，记录消费</button><button class="secondary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">手动录入</button></view>
   <button wx:if="{{isOwner && memberCount !== 2}}" class="invite-button" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">邀请同行人</button>
   <button wx:if="{{inviteReady}}" class="share-button" open-type="share">发送邀请</button>
-  <view wx:if="{{isOwner}}" class="ledger-card trip-date-editor"><text class="ledger-section">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates"/><button class="ledger-secondary" bindtap="saveTripDates" loading="{{savingDates}}" disabled="{{savingDates}}">保存日期</button><text class="ledger-error">{{dateError}}</text></view>
+  <view wx:if="{{isOwner}}" class="ledger-card trip-date-editor"><text class="ledger-section">出行日期（可选）</text><calendar-picker id="date-calendar" mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates"/><button class="ledger-secondary" bindtap="saveTripDates" loading="{{savingDates}}" disabled="{{savingDates}}">保存日期</button><text class="ledger-error">{{dateError}}</text></view>
   <button wx:if="{{isOwner}}" class="delete-trip-button" bindtap="deleteTripRecord">删除这段旅行</button>
 </view>

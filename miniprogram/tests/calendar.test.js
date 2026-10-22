@@ -4,7 +4,7 @@ const fs=require('node:fs')
 const path=require('node:path')
 const vm=require('node:vm')
 const calendarModule={exports:{}}
-const calendarSource=fs.readFileSync(path.join(__dirname,'../components/calendar-picker/index.js'),'utf8')
+const calendarSource=fs.readFileSync(path.join(__dirname,'../components/calendar-picker/calendar-sheet.js'),'utf8')
 vm.runInNewContext(calendarSource,{Component(){},module:calendarModule,Date,require(){throw new Error('日历入口不应依赖未打包的辅助模块')}})
 const {monthDays,shiftMonth,selectRange}=calendarModule.exports
 
@@ -26,7 +26,7 @@ test('range selection orders dates and starts a fresh range after completion',()
 
 function component(properties) {
   let definition
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../components/calendar-picker/index.js'),'utf8'),{require(){throw new Error('日历入口不应依赖未打包的辅助模块')},module:{exports:{}},Component:value=>{definition=value},Date})
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../components/calendar-picker/calendar-sheet.js'),'utf8'),{require(){throw new Error('日历入口不应依赖未打包的辅助模块')},module:{exports:{}},Component:value=>{definition=value},Date})
   const events=[]
   return {...definition.methods,properties:{mode:'single',value:'',start:'',end:'',...properties},data:{...definition.data},events,setData(value){Object.assign(this.data,value)},triggerEvent(name,detail){events.push({name,detail})}}
 }
