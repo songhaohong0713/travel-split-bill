@@ -4,6 +4,7 @@ import pytest
 from app.api.v1.auth import create_access_token
 from app.main import app
 from app.providers.cloudbase_pg import CloudBasePgRequestError
+from expense_samples import payload as valid_payload
 from fastapi.testclient import TestClient
 
 
@@ -15,15 +16,33 @@ class FakeCloudBasePg:
     async def rpc(self, name: str, payload: dict[str, object]) -> dict[str, object]:
         self.rpc_calls.append((name, payload))
         if name == "tsb_list_member_trips":
-            return [{"id": "trip-1", "name": "Tokyo", "default_currency": "JPY", "member_count": 2}]
+            return [
+                {
+                    "id": "trip-1",
+                    "name": "Tokyo",
+                    "default_currency": "JPY",
+                    "member_count": 2,
+                }
+            ]
         if name.startswith("tsb_delete_owner_"):
             return {"deleted": True}
-        return {"id": payload["p_trip_id"], "name": payload["p_name"], "default_currency": payload["p_default_currency"]}
+        return {
+            "id": payload["p_trip_id"],
+            "name": payload["p_name"],
+            "default_currency": payload["p_default_currency"],
+        }
 
     async def request(
-        self, method: str, path: str, *, params: dict[str, object] | None = None, payload: object = None
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        payload: object = None,
     ) -> list[dict[str, str]]:
         self.request_calls.append((method, path, params))
+        if path == "/trip_members":
+            return [{"user_id": "owner-1"}]
         return [{"id": "trip-1", "name": "Tokyo", "default_currency": "JPY"}]
 
 
@@ -46,7 +65,9 @@ def test_trips_use_cloudbase_rpc_for_mutation_and_table_api_for_reading(
     test_client, provider = client
 
     created = test_client.post(
-        "/v1/trips", json={"name": "Tokyo", "default_currency": "JPY"}, headers=_headers()
+        "/v1/trips",
+        json={"name": "Tokyo", "default_currency": "JPY"},
+        headers=_headers(),
     )
     listed = test_client.get("/v1/trips", headers=_headers())
 
@@ -61,7 +82,9 @@ def test_cloudbase_expense_revision_conflict_returns_409(
 ) -> None:
     test_client, provider = client
 
-    async def conflicting_rpc(name: str, payload: dict[str, object]) -> dict[str, object]:
+    async def conflicting_rpc(
+        name: str, payload: dict[str, object]
+    ) -> dict[str, object]:
         provider.rpc_calls.append((name, payload))
         raise CloudBasePgRequestError(400, "TSB_REVISION_CONFLICT")
 
@@ -69,7 +92,11 @@ def test_cloudbase_expense_revision_conflict_returns_409(
     response = test_client.patch(
         "/v1/trips/trip-1/expenses/expense-1",
         headers=_headers(),
-        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+        json={
+            "revision": 1,
+            "occurred_at": "2026-09-28",
+            "payload": valid_payload(payer="owner-1"),
+        },
     )
 
     assert response.status_code == 409
@@ -89,7 +116,11 @@ def test_cloudbase_expense_not_found_result_returns_404(
     response = test_client.patch(
         "/v1/trips/trip-1/expenses/expense-1",
         headers=_headers(),
-        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+        json={
+            "revision": 1,
+            "occurred_at": "2026-09-28",
+            "payload": valid_payload(payer="owner-1"),
+        },
     )
 
     assert response.status_code == 404
@@ -109,7 +140,11 @@ def test_cloudbase_expense_malformed_result_returns_503(
     response = test_client.patch(
         "/v1/trips/trip-1/expenses/expense-1",
         headers=_headers(),
-        json={"revision": 1, "occurred_at": "2026-09-28", "payload": {}},
+        json={
+            "revision": 1,
+            "occurred_at": "2026-09-28",
+            "payload": valid_payload(payer="owner-1"),
+        },
     )
 
     assert response.status_code == 503
@@ -121,12 +156,20 @@ def test_cloudbase_owner_deletion_uses_delete_rpcs(
 ) -> None:
     test_client, provider = client
 
-    expense = test_client.delete("/v1/trips/trip-1/expenses/expense-1", headers=_headers())
+    expense = test_client.delete(
+        "/v1/trips/trip-1/expenses/expense-1", headers=_headers()
+    )
     trip = test_client.delete("/v1/trips/trip-1", headers=_headers())
 
     assert expense.status_code == trip.status_code == 204
     assert provider.rpc_calls == [
-        ("tsb_delete_owner_expense", {"p_trip_id": "trip-1", "p_expense_id": "expense-1", "p_owner_id": "owner-1"}),
+        (
+            "tsb_delete_owner_expense",
+            {
+                "p_trip_id": "trip-1",
+                "p_expense_id": "expense-1",
+                "p_owner_id": "owner-1",
+            },
+        ),
         ("tsb_delete_owner_trip", {"p_trip_id": "trip-1", "p_owner_id": "owner-1"}),
     ]
-

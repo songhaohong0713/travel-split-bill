@@ -30,14 +30,14 @@ router = APIRouter(prefix="/v1", tags=["settlements"])
 
 class MoneyInput(BaseModel):
     currency: str = Field(pattern=r"^[A-Z]{3}$")
-    amount: str = Field(pattern=r"^-?\d+(\.\d+)?$")
+    amount: str = Field(pattern=r"^-?\d+(\.\d+)?$", max_length=24)
 
     def to_money(self) -> Money:
         return Money(currency=self.currency, amount=self.amount)
 
 
 class ItemInput(BaseModel):
-    item_id: str
+    item_id: str = Field(min_length=1, max_length=120)
     amount: MoneyInput
     allocation: dict[str, str]
     tax_amount: MoneyInput | None = None
@@ -73,7 +73,7 @@ class AdjustmentInput(BaseModel):
 class ExpenseInput(BaseModel):
     expense_id: str
     payer_id: str
-    items: list[ItemInput]
+    items: list[ItemInput] = Field(min_length=1, max_length=1000)
     adjustments: list[AdjustmentInput] = []
     actual_payment: MoneyInput | None = None
     reference_rate: str | None = None
@@ -104,9 +104,23 @@ class ExpenseInput(BaseModel):
 
 
 class PreviewRequest(BaseModel):
-    participants: list[str]
+    participants: list[str] = Field(min_length=1, max_length=2)
     settlement_currency: str = Field(pattern=r"^[A-Z]{3}$")
-    expenses: list[ExpenseInput]
+    expenses: list[ExpenseInput] = Field(max_length=1000)
+
+
+def _calculate(body: PreviewRequest):
+    try:
+        expenses = tuple(e.to_expense(body.settlement_currency) for e in body.expenses)
+        return _grouped_payload(tuple(body.participants), expenses)
+    except (ValueError, ArithmeticError) as exc:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "INVALID_SETTLEMENT",
+                "message": "分摊或汇率数据无效，请核对后重试",
+            },
+        ) from exc
 
 
 def _money(money: Money) -> dict[str, str]:
@@ -115,15 +129,40 @@ def _money(money: Money) -> dict[str, str]:
 
 def _result_payload(result) -> dict[str, object]:
     return {
-        "responsibility_by_participant": {key: _money(value) for key, value in result.responsibility_by_participant.items()},
-        "paid_by_participant": {key: _money(value) for key, value in result.paid_by_participant.items()},
-        "net_by_participant": {key: _money(value) for key, value in result.net_by_participant.items()},
-        "transfers": [{"from_participant_id": transfer.from_participant_id, "to_participant_id": transfer.to_participant_id, "amount": _money(transfer.amount)} for transfer in result.transfers],
-        "audit_lines": [{"expense_id": line.expense_id, "participant_id": line.participant_id, "amount": _money(line.amount), "reason": line.reason, "rate_source": line.rate_source} for line in result.audit_lines],
+        "responsibility_by_participant": {
+            key: _money(value)
+            for key, value in result.responsibility_by_participant.items()
+        },
+        "paid_by_participant": {
+            key: _money(value) for key, value in result.paid_by_participant.items()
+        },
+        "net_by_participant": {
+            key: _money(value) for key, value in result.net_by_participant.items()
+        },
+        "transfers": [
+            {
+                "from_participant_id": transfer.from_participant_id,
+                "to_participant_id": transfer.to_participant_id,
+                "amount": _money(transfer.amount),
+            }
+            for transfer in result.transfers
+        ],
+        "audit_lines": [
+            {
+                "expense_id": line.expense_id,
+                "participant_id": line.participant_id,
+                "amount": _money(line.amount),
+                "reason": line.reason,
+                "rate_source": line.rate_source,
+            }
+            for line in result.audit_lines
+        ],
     }
 
 
-def _grouped_payload(participants: tuple[str, ...], expenses: tuple[Expense, ...]) -> dict[str, object]:
+def _grouped_payload(
+    participants: tuple[str, ...], expenses: tuple[Expense, ...]
+) -> dict[str, object]:
     groups = calculate_grouped_settlement(participants, expenses)
     result: dict[str, object] = {
         "groups": [
@@ -135,13 +174,18 @@ def _grouped_payload(participants: tuple[str, ...], expenses: tuple[Expense, ...
         result.update(_result_payload(next(iter(groups.values()))))
     return result
 
+
 def _cloudbase(request: Request) -> CloudBasePgClient | None:
     return getattr(request.app.state, "cloudbase_pg", None)
+
 
 def _cloudbase_error(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=503,
-        detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
+        detail={
+            "code": "DATABASE_UNAVAILABLE",
+            "message": "CloudBase PostgreSQL is unavailable",
+        },
     )
 
 
@@ -165,44 +209,81 @@ async def exchange_rate(
     return {"data": quote}
 
 
-
 @router.post("/trips/{trip_id}/settlements/preview")
 async def preview_settlement(
-    trip_id: str, body: PreviewRequest, http_request: Request, session: DbSession, user_id: CurrentUser
+    trip_id: str,
+    body: PreviewRequest,
+    http_request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
 ) -> dict[str, object]:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
-            rows = await cloudbase.request("GET", "/trip_members", params={"trip_id": f"eq.{trip_id}", "user_id": f"eq.{user_id}", "select": "id", "limit": "1"})
+            rows = await cloudbase.request(
+                "GET",
+                "/trip_members",
+                params={
+                    "trip_id": f"eq.{trip_id}",
+                    "user_id": f"eq.{user_id}",
+                    "select": "id",
+                    "limit": "1",
+                },
+            )
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(rows, list) or not rows:
             raise _not_found()
     else:
         require_trip_member(session, trip_id, user_id)
-    expenses = tuple(expense.to_expense(body.settlement_currency) for expense in body.expenses)
-    return {"data": _grouped_payload(tuple(body.participants), expenses)}
+    return {"data": _calculate(body)}
 
-@router.post("/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/trips/{trip_id}/settlements/publish", status_code=status.HTTP_201_CREATED
+)
 async def publish_settlement(
-    trip_id: str, body: PreviewRequest, http_request: Request, session: DbSession, user_id: CurrentUser
+    trip_id: str,
+    body: PreviewRequest,
+    http_request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
 ) -> dict[str, object]:
-    expenses = tuple(expense.to_expense(body.settlement_currency) for expense in body.expenses)
-    projection = _grouped_payload(tuple(body.participants), expenses)
+    projection = _calculate(body)
+    projection["kind"] = "calculation_snapshot"
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         version_id = str(uuid4())
         try:
-            response = await cloudbase.rpc("tsb_publish_settlement_version", {"p_version_id": version_id, "p_trip_id": trip_id, "p_owner_id": user_id, "p_result": projection, "p_public": projection})
+            response = await cloudbase.rpc(
+                "tsb_publish_settlement_version",
+                {
+                    "p_version_id": version_id,
+                    "p_trip_id": trip_id,
+                    "p_owner_id": user_id,
+                    "p_result": projection,
+                    "p_public": projection,
+                },
+            )
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(response, dict) or response.get("not_found"):
             raise _not_found()
-        return {"data": {"id": str(response["id"]), "trip_id": trip_id, "result": projection}}
-    trip = session.scalar(select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id))
+        return {
+            "data": {
+                "id": str(response["id"]),
+                "trip_id": trip_id,
+                "result": projection,
+            }
+        }
+    trip = session.scalar(
+        select(Trip).where(Trip.id == trip_id, Trip.owner_id == user_id)
+    )
     if trip is None:
         raise _not_found()
-    version = SettlementVersion(trip_id=trip_id, result_json=projection, public_json=projection)
+    version = SettlementVersion(
+        trip_id=trip_id, result_json=projection, public_json=projection
+    )
     session.add(version)
     session.flush()
     trip.latest_version_id = version.id

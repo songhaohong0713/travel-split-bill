@@ -77,7 +77,7 @@ Page({
           return getLedger(this.data.tripId).then(ledger => {
             const labels = this.data.memberLabelMap
             const describe = p => `${labels[p.from_participant_id] || '同行人'} 需付给 ${labels[p.to_participant_id] || '同行人'} ${p.amount} ${p.currency}`
-            this.setData({ dailyLedger: true, summaryText:(ledger.summary || []).filter(g => !g.offset_only).map(describe).join('；') || '当前无需转账', summaryIncomplete:ledger.summary_incomplete, days: ledger.days.map(day => ({...day, statusLabel: {recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status], pendingText: day.pending.map(describe).join('；') || (day.error ? '需补全消费' : '当前无需转账')})), memberCount: ledger.members.length, ledgerError: '' })
+            this.setData({ dailyLedger: true, summaryText:ledger.history_status === 'pending' ? '历史结算待确认' : (ledger.summary || []).filter(g => !g.offset_only).map(describe).join('；') || '当前无需转账', summaryIncomplete:ledger.summary_incomplete, days: ledger.days.map(day => ({...day, statusLabel: {recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status], pendingText: day.pending.map(describe).join('；') || (day.error ? '需补全消费' : '当前无需转账')})), memberCount: ledger.members.length, ledgerError: '' })
             return records
           }).catch(error => { this.setData({dailyLedger:true,ledgerError:error.message || '暂时无法读取每日账单'}); return records })
         }

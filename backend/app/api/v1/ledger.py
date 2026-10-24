@@ -15,7 +15,9 @@ from app.api.v1.trips import (
     require_trip_member,
 )
 from app.core.ledger import amount, payment_preview, project, snapshot_token
+from app.db.ledger_reads import member_snapshots
 from app.db.models import ExpenseRecord, TripLedger, TripMember
+from app.db.payment_projection import sync_payments
 from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
     CloudBasePgRequestError,
@@ -27,17 +29,37 @@ router = APIRouter(prefix="/v1/trips", tags=["ledger"])
 
 @router.get("/ledger-summary")
 async def ledger_summary(request: Request, session: DbSession, user_id: CurrentUser):
-    from app.api.v1.trips import list_trips
-
-    trips = (await list_trips(request, session, user_id))["data"]
+    cloud = _cloudbase(request)
+    if cloud is not None:
+        try:
+            rows = await cloud.rpc(
+                "tsb_member_ledger_snapshots", {"p_user_id": user_id}
+            )
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(rows, list):
+            raise _cloudbase_error(ValueError("invalid ledger summaries"))
+        snapshots = [
+            (row["trip_id"], {k: v for k, v in row.items() if k != "trip_id"})
+            for row in rows
+        ]
+    else:
+        snapshots = member_snapshots(session, user_id)
     totals: dict[str, dict[str, Decimal]] = {}
     summaries = []
-    for trip in trips:
-        old = await snapshot(trip["id"], request, session, user_id)
+    for trip_id, old in snapshots:
         ledger = project(old)
         closed = [day for day in ledger["days"] if day["status"] != "recording"]
         pending = []
-        if closed and all(day["status"] != "invalid" for day in closed):
+        if (
+            closed
+            and ledger["history_status"] != "pending"
+            and all(day["status"] != "invalid" for day in closed)
+        ):
             pending = payment_preview(old)["groups"]
         pending = [
             {
@@ -57,10 +79,11 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
             total[key] += Decimal(group["amount"])
         summaries.append(
             {
-                "id": trip["id"],
+                "id": trip_id,
                 "pending": pending,
                 "incomplete": any(day["error"] for day in ledger["days"]),
                 "pending_days": sum(day["status"] == "pending" for day in closed),
+                "history_status": ledger["history_status"],
             }
         )
     return {
@@ -170,6 +193,7 @@ async def persist(trip_id, request, session, user_id, old, state):
 
         try:
             session.add(TripLedger(trip_id=trip_id, revision=1, state_json=state))
+            sync_payments(session, trip_id, state)
             session.commit()
         except IntegrityError as exc:
             session.rollback()
@@ -185,6 +209,7 @@ async def persist(trip_id, request, session, user_id, old, state):
         if result.rowcount != 1:
             session.rollback()
             raise conflict()
+        sync_payments(session, trip_id, state)
         session.commit()
 
 

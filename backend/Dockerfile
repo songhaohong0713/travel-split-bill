@@ -1,5 +1,6 @@
 # CloudBase Run image for the FastAPI API service.
 FROM python:3.12-slim
+ENV APP_ENV=production
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

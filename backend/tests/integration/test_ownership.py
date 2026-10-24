@@ -4,6 +4,7 @@ import pytest
 from app.api.v1.auth import create_access_token
 from app.db.session import configure_database, create_schema, drop_schema
 from app.main import app
+from expense_samples import payload
 from fastapi.testclient import TestClient
 
 
@@ -38,7 +39,7 @@ def test_other_owner_cannot_read_expenses(client: TestClient) -> None:
             **auth("owner-a"),
             "Idempotency-Key": "4d7ccd23-cd86-45f8-b11f-d522d0a5ece5",
         },
-        json={"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}},
+        json={"occurred_at": "2026-08-15", "payload": payload(note="抹茶")},
     )
     assert create_response.status_code == 201
 
@@ -54,7 +55,7 @@ def test_same_idempotency_key_creates_one_expense(client: TestClient) -> None:
         **auth("owner-a"),
         "Idempotency-Key": "4d7ccd23-cd86-45f8-b11f-d522d0a5ece5",
     }
-    request = {"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}}
+    request = {"occurred_at": "2026-08-15", "payload": payload(note="抹茶")}
 
     first = client.post(f"/v1/trips/{trip_id}/expenses", headers=headers, json=request)
     second = client.post(f"/v1/trips/{trip_id}/expenses", headers=headers, json=request)
@@ -77,8 +78,8 @@ def test_trip_list_only_returns_current_owners_trips(client: TestClient) -> None
             "id": first_trip_id,
             "name": "东京",
             "default_currency": "CNY",
-                "start_date": None,
-                "end_date": None,
+            "start_date": None,
+            "end_date": None,
             "member_count": 1,
             "is_owner": True,
         }
@@ -93,7 +94,7 @@ def test_owner_can_update_expense_with_current_revision(client: TestClient) -> N
             **auth("owner-a"),
             "Idempotency-Key": "a9d5c121-faa7-4104-a455-ae9e1ca81c62",
         },
-        json={"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}},
+        json={"occurred_at": "2026-08-15", "payload": payload(note="抹茶")},
     )
     expense_id = created.json()["data"]["id"]
 
@@ -103,7 +104,7 @@ def test_owner_can_update_expense_with_current_revision(client: TestClient) -> N
         json={
             "revision": 1,
             "occurred_at": "2026-08-16",
-            "payload": {"note": "抹茶拿铁"},
+            "payload": payload(note="抹茶拿铁"),
         },
     )
 
@@ -112,7 +113,7 @@ def test_owner_can_update_expense_with_current_revision(client: TestClient) -> N
         "id": expense_id,
         "revision": 2,
         "occurred_at": "2026-08-16",
-        "payload": {"note": "抹茶拿铁"},
+        "payload": payload(note="抹茶拿铁"),
     }
 
 
@@ -126,7 +127,7 @@ def test_expense_update_rejects_stale_revision_and_other_owner(
             **auth("owner-a"),
             "Idempotency-Key": "bf2379ae-55a2-45a0-8147-34ccf27972c8",
         },
-        json={"occurred_at": "2026-08-15", "payload": {"note": "抹茶"}},
+        json={"occurred_at": "2026-08-15", "payload": payload(note="抹茶")},
     )
     expense_id = created.json()["data"]["id"]
 
@@ -136,7 +137,7 @@ def test_expense_update_rejects_stale_revision_and_other_owner(
         json={
             "revision": 99,
             "occurred_at": "2026-08-15",
-            "payload": {"note": "抹茶"},
+            "payload": payload(note="抹茶"),
         },
     )
     forbidden = client.patch(
@@ -145,7 +146,7 @@ def test_expense_update_rejects_stale_revision_and_other_owner(
         json={
             "revision": 1,
             "occurred_at": "2026-08-15",
-            "payload": {"note": "抹茶"},
+            "payload": payload(note="抹茶"),
         },
     )
 
@@ -163,7 +164,7 @@ def test_only_trip_owner_can_delete_expenses_and_trip(client: TestClient) -> Non
             **auth("owner-a"),
             "Idempotency-Key": "e3ea5a6b-809d-40aa-b9b8-5507f97bfca1",
         },
-        json={"occurred_at": "2026-09-28", "payload": {"note": "晚餐"}},
+        json={"occurred_at": "2026-09-28", "payload": payload(note="晚餐")},
     )
     expense_id = created.json()["data"]["id"]
 
@@ -178,4 +179,7 @@ def test_only_trip_owner_can_delete_expenses_and_trip(client: TestClient) -> Non
     assert forbidden.status_code == 404
     assert deleted_expense.status_code == 204
     assert deleted_trip.status_code == 204
-    assert client.get(f"/v1/trips/{trip_id}/expenses", headers=auth("owner-a")).status_code == 404
+    assert (
+        client.get(f"/v1/trips/{trip_id}/expenses", headers=auth("owner-a")).status_code
+        == 404
+    )

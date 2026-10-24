@@ -33,7 +33,7 @@ Page({
           const details=Object.fromEntries(summary.trips.map(t=>[t.id,t]))
           this.setData({summaryGroups:summary.groups, trips:this.data.trips.map(trip=>{
             const detail=details[trip.id]
-            return {...trip,pendingText:detail ? detail.incomplete ? '需补全消费' : detail.pending.length ? detail.pending.map(g=>g.offset_only ? '可抵扣结清' : `${g.direction === 'receivable' ? '待收' : '待付'} ${g.amount} ${g.currency}`).join('；') : '暂无待结清' : '继续录入'}
+            return {...trip,pendingText:detail ? detail.history_status === 'pending' ? '历史结算待确认' : detail.incomplete ? '需补全消费' : detail.pending.length ? detail.pending.map(g=>g.offset_only ? '可抵扣结清' : `${g.direction === 'receivable' ? '待收' : '待付'} ${g.amount} ${g.currency}`).join('；') : '暂无待结清' : '继续录入'}
           }),summaryError:summary.trips.some(t=>t.incomplete) ? '部分消费待补全，汇总尚不完整' : ''})
         }).catch(error => this.setData({summaryError:error.message || '暂时无法读取待结清金额'}))
       })

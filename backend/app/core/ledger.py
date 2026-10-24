@@ -112,10 +112,15 @@ def project(snapshot):
         "payments": state["payments"],
         "revision": snapshot["revision"],
         "members": members,
+        "history_status": state.get("history_confirmation", {}).get(
+            "status", "not_required"
+        ),
     }
 
 
 def payment_preview(snapshot, requested_dates=None):
+    if snapshot["state"].get("history_confirmation", {}).get("status") == "pending":
+        raise ValueError("请先确认历史结算情况")
     ledger = project(snapshot)
     selected = (
         sorted(set(requested_dates))

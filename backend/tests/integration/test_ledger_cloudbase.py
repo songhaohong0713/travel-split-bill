@@ -106,3 +106,27 @@ def test_cloudbase_concurrent_change_during_commit_returns_conflict(monkeypatch)
             == 409
         )
         assert not cloud.state["state"]["payments"]
+
+
+def test_cloudbase_home_summary_uses_one_batch_rpc(monkeypatch):
+    class BatchCloud(LedgerCloud):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        async def rpc(self, name, payload):
+            self.calls.append(name)
+            assert name == "tsb_member_ledger_snapshots"
+            assert payload == {"p_user_id": "a"}
+            return [{"trip_id": "t", **deepcopy(self.state)}]
+
+    cloud = BatchCloud()
+    monkeypatch.setattr(app.state, "cloudbase_pg", cloud, raising=False)
+    headers = {"Authorization": f"Bearer {create_access_token('a')}"}
+    with TestClient(app) as client:
+        response = client.get("/v1/trips/ledger-summary", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["groups"] == [
+        {"currency": "CNY", "receivable": "200.00", "payable": "0.00"}
+    ]
+    assert cloud.calls == ["tsb_member_ledger_snapshots"]

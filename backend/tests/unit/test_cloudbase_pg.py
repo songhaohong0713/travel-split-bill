@@ -15,7 +15,10 @@ def test_from_environment_builds_postgrest_base_url(monkeypatch: pytest.MonkeyPa
 
     client = CloudBasePgClient.from_environment()
 
-    assert client.base_url == "https://travel-split-bill.api.tcloudbasegateway.com/v1/rdb/rest"
+    assert (
+        client.base_url
+        == "https://travel-split-bill.api.tcloudbasegateway.com/v1/rdb/rest"
+    )
 
 
 def test_from_environment_rejects_missing_api_key(monkeypatch: pytest.MonkeyPatch):
@@ -56,7 +59,13 @@ def test_client_accepts_an_empty_successful_patch_response():
         ),
     )
 
-    assert asyncio.run(client.request("PATCH", "/receipt_jobs", payload={"status": "needs_review"})) is None
+    assert (
+        asyncio.run(
+            client.request("PATCH", "/receipt_jobs", payload={"status": "needs_review"})
+        )
+        is None
+    )
+
 
 def test_from_environment_uses_cloud_hosting_injected_api_key(
     monkeypatch: pytest.MonkeyPatch,
@@ -80,3 +89,32 @@ def test_from_environment_prefers_cloud_hosting_injected_api_key(
     client = CloudBasePgClient.from_environment()
 
     assert client._api_key == "hosting-injected-key"
+
+
+def test_owned_connection_is_reused_and_closed(monkeypatch):
+    created = []
+    real_client = httpx.AsyncClient
+
+    def factory(**kwargs):
+        client = real_client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json=[], request=request)
+            )
+        )
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+    async def check():
+        client = CloudBasePgClient("test", "test-key")
+        await client.request("GET", "/trips")
+        await client.request("GET", "/expenses")
+        assert len(created) == 1 and not created[0].is_closed
+        await client.aclose()
+        assert created[0].is_closed
+        await client.request("GET", "/trips")
+        assert len(created) == 2
+        await client.aclose()
+
+    asyncio.run(check())

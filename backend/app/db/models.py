@@ -1,12 +1,15 @@
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -60,29 +63,72 @@ class Trip(Base):
 
 class TripMember(Base):
     __tablename__ = "trip_members"
-    __table_args__ = (UniqueConstraint("trip_id", "user_id", name="uq_trip_members_trip_user"),)
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    __table_args__ = (
+        UniqueConstraint("trip_id", "user_id", name="uq_trip_members_trip_user"),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class TripLedger(Base):
     __tablename__ = "trip_ledgers"
-    trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(
+        ForeignKey("trips.id", ondelete="CASCADE"), primary_key=True
+    )
     revision: Mapped[int] = mapped_column(Integer, default=0)
     state_json: Mapped[dict[str, object]] = mapped_column(JSON)
 
 
 class TripInvite(Base):
     __tablename__ = "trip_invites"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     creator_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime())
     used_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+
+
+class PaymentRecord(Base):
+    """Query projection of the immutable payment entry in trip_ledgers."""
+
+    __tablename__ = "payment_records"
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_payment_amount_nonnegative"),
+        CheckConstraint("from_id <> to_id", name="ck_payment_distinct_people"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    trip_id: Mapped[str] = mapped_column(
+        ForeignKey("trips.id", ondelete="CASCADE"), index=True
+    )
+    currency: Mapped[str] = mapped_column(String(3))
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    from_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    to_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    payload_json: Mapped[dict[str, object]] = mapped_column(JSON)
+
+
+class PaymentAllocationRecord(Base):
+    __tablename__ = "payment_allocations"
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payment_records.id", ondelete="CASCADE"), primary_key=True
+    )
+    occurred_at: Mapped[date] = mapped_column(Date, primary_key=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
 
 
 class SettlementVersion(Base):
@@ -129,7 +175,9 @@ class ReceiptJob(Base):
     image_id: Mapped[str] = mapped_column(ForeignKey("receipt_images.id"), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="queued")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
-    candidates_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    candidates_json: Mapped[list[str] | list[dict[str, str]] | None] = mapped_column(
+        JSON, nullable=True
+    )
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
 

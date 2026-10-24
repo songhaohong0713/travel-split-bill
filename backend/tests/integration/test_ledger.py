@@ -229,3 +229,235 @@ def test_home_summary_never_offsets_separate_trips(ledger):
     assert result["groups"] == [
         {"currency": "CNY", "receivable": "100.00", "payable": "150.00"}
     ]
+
+
+def test_history_partial_confirmation_is_explicit_and_does_not_double_count(ledger):
+    c, base = ledger
+    expense(c, base, "400")
+    assert c.post(base + "/history/prepare", headers=auth()).status_code == 200
+    assert (
+        c.get(base + "/ledger", headers=auth()).json()["data"]["history_status"]
+        == "pending"
+    )
+    assert (
+        c.post(base + "/payments/preview", headers=auth(), json={}).status_code == 422
+    )
+    selection = {
+        "mode": "partial",
+        "payments": [
+            {
+                "date": "2026-10-07",
+                "currency": "CNY",
+                "amount": "170",
+                "from_participant_id": "b",
+                "to_participant_id": "a",
+            }
+        ],
+    }
+    p = c.post(base + "/history/preview", headers=auth(), json=selection)
+    assert p.status_code == 200, p.text
+    token = p.json()["data"]["token"]
+    assert (
+        c.post(
+            base + "/history/confirm",
+            headers=auth("b"),
+            json={**selection, "token": token},
+        ).status_code
+        == 404
+    )
+    r = c.post(
+        base + "/history/confirm", headers=auth(), json={**selection, "token": token}
+    )
+    assert r.status_code == 200, r.text
+    assert preview(c, base)["groups"][0]["amount"] == "30.00"
+    assert (
+        c.post(
+            base + "/history/confirm",
+            headers=auth(),
+            json={**selection, "token": token},
+        ).status_code
+        == 409
+    )
+
+
+def test_history_preview_changes_and_overpayment_are_rejected(ledger):
+    c, base = ledger
+    expense(c, base)
+    c.post(base + "/history/prepare", headers=auth())
+    p = c.post(
+        base + "/history/preview", headers=auth(), json={"mode": "settled"}
+    ).json()["data"]
+    expense(c, base, "60")
+    assert (
+        c.post(
+            base + "/history/confirm",
+            headers=auth(),
+            json={"mode": "settled", "token": p["token"]},
+        ).status_code
+        == 409
+    )
+    selection = {
+        "mode": "partial",
+        "payments": [
+            {
+                "date": "2026-10-07",
+                "currency": "CNY",
+                "amount": "999",
+                "from_participant_id": "b",
+                "to_participant_id": "a",
+            }
+        ],
+    }
+    assert (
+        c.post(base + "/history/preview", headers=auth(), json=selection).status_code
+        == 422
+    )
+    p = c.post(
+        base + "/history/preview", headers=auth(), json={"mode": "settled"}
+    ).json()["data"]
+    assert (
+        c.post(
+            base + "/history/confirm",
+            headers=auth(),
+            json={"mode": "settled", "token": p["token"]},
+        ).status_code
+        == 200
+    )
+    assert not preview(c, base)["groups"]
+
+
+def test_empty_trip_cannot_be_locked_in_history_confirmation(ledger):
+    c, base = ledger
+    assert c.post(base + "/history/prepare", headers=auth()).status_code == 422
+    assert (
+        c.get(base + "/ledger", headers=auth()).json()["data"]["history_status"]
+        == "not_required"
+    )
+
+
+def test_invalid_save_preserves_previous_expense_and_projection(ledger):
+    from app.db.models import ExpenseRecord, PaymentAllocationRecord, PaymentRecord
+    from app.db.session import SessionLocal
+    from sqlalchemy import select
+
+    c, base = ledger
+    saved, body = expense(c, base)
+    body["payload"]["participants"].append("outsider")
+    assert (
+        c.patch(
+            base + "/expenses/" + saved["id"],
+            headers=auth(),
+            json={**body, "revision": 1},
+        ).status_code
+        == 422
+    )
+    assert (
+        c.post(
+            base + "/expenses",
+            headers={**auth(), "Idempotency-Key": str(uuid4())},
+            json=body,
+        ).status_code
+        == 422
+    )
+    c.post(base + "/days/2026-10-07/close", headers=auth())
+    payment = pay(c, base, preview(c, base)).json()["data"]
+    c.post(base + "/payments/" + payment["id"] + "/revoke", headers=auth())
+    with SessionLocal() as session:
+        records = session.scalars(select(ExpenseRecord)).all()
+        assert len(records) == 1 and records[0].revision == 1
+        row = session.get(PaymentRecord, payment["id"])
+        assert str(row.amount) == "200.00" and row.revoked_at is not None
+        assert row.payload_json["basis_expenses"][0]["revision"] == 1
+        assert len(session.scalars(select(PaymentAllocationRecord)).all()) == 1
+
+
+def test_expense_pagination_and_batch_query_count(ledger):
+    from app.db import session as database
+    from sqlalchemy import event
+
+    c, base = ledger
+    ids = {expense(c, base)[0]["id"] for _ in range(5)}
+    cursor = None
+    seen = []
+    while True:
+        params = {"limit": 2}
+        if cursor:
+            params["after_id"] = cursor
+        response = c.get(base + "/expenses/page", headers=auth("b"), params=params)
+        assert response.status_code == 200, response.text
+        page = response.json()["data"]
+        seen.extend(row["id"] for row in page["items"])
+        cursor = page["next_after_id"]
+        if not cursor:
+            break
+    assert len(seen) == 5 and set(seen) == ids
+    assert c.get(base + "/expenses/page", headers=auth("outsider")).status_code == 404
+    assert (
+        c.get(
+            base + "/expenses/page", headers=auth(), params={"limit": 101}
+        ).status_code
+        == 422
+    )
+    for _ in range(4):
+        c.post(
+            "/v1/trips",
+            headers=auth(),
+            json={"name": "另一次", "default_currency": "CNY"},
+        )
+    statements = []
+
+    def record(_conn, _cursor, statement, _params, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(database.engine, "before_cursor_execute", record)
+    try:
+        response = c.get("/v1/trips/ledger-summary", headers=auth())
+    finally:
+        event.remove(database.engine, "before_cursor_execute", record)
+    assert response.status_code == 200, response.text
+    assert len(response.json()["data"]["trips"]) == 5
+    assert len(statements) == 4
+
+
+def test_validation_response_has_request_id_and_no_raw_input(ledger):
+    c, _base = ledger
+    response = c.post(
+        "/v1/trips",
+        headers=auth(),
+        json={"name": "private-input", "default_currency": "BAD-CURRENCY"},
+    )
+    assert response.status_code == 422
+    assert response.headers["X-Request-ID"] == response.json()["error"]["request_id"]
+    assert "private-input" not in response.text
+
+
+def test_unpaid_history_keeps_confirmation_basis_after_expense_deletion(ledger):
+    from app.db.models import TripLedger
+    from app.db.session import SessionLocal
+
+    c, base = ledger
+    saved, _ = expense(c, base)
+    c.post(base + "/history/prepare", headers=auth())
+    selection = {"mode": "unpaid"}
+    response = c.post(base + "/history/preview", headers=auth(), json=selection)
+    token = response.json()["data"]["token"]
+    assert (
+        c.post(
+            base + "/history/confirm",
+            headers=auth(),
+            json={**selection, "token": token},
+        ).status_code
+        == 200
+    )
+    assert (
+        c.delete(base + "/expenses/" + saved["id"], headers=auth()).status_code == 204
+    )
+    with SessionLocal() as session:
+        confirmation = session.get(TripLedger, base.rsplit("/", 1)[1]).state_json[
+            "history_confirmation"
+        ]
+        assert confirmation["basis_expenses"][0]["id"] == saved["id"]
+        assert confirmation["basis_expenses"][0]["revision"] == 1
+        assert confirmation["selection"]["mode"] == "unpaid"
+        assert confirmation["basis_members"] == ["a", "b"]
