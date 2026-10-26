@@ -1,34 +1,16 @@
-<view class="page trips-page">
-  <view class="home-hero">
-    <text class="hero-mark">旅账</text>
-    <text class="title">我的旅行</text>
-    <text class="subtitle">下一笔，记到哪段旅程？</text>
+<view class="screen">
+  <view class="heading"><text class="muted block">{{greeting}}</text><text class="title greeting">下一笔，记到哪段旅程？</text></view>
+  <view wx:if="{{authFailed}}" class="login-notice row"><view><text class="block">登录未完成</text><text class="muted block">未能识别登录状态，仍可新建旅行</text></view><button class="retry" bindtap="retryLogin">重试</button></view>
+  <view wx:if="{{tripCount}}" class="card home-summary">
+    <view class="row"><text class="muted">累计待结清</text><text wx:if="{{!hasSummary}}" class="chip">¥ CNY</text></view>
+    <block wx:if="{{hasSummary}}"><view wx:for="{{summaryGroups}}" wx:key="currency" class="summary-currency"><view class="row"><text class="summary-value"><text class="money-symbol">{{item.symbol}}</text>{{item.amount}}</text><text class="chip">{{item.currency}}</text></view><text class="muted block">{{item.direction}}</text></view></block>
+    <view wx:else><text class="summary-value"><text class="money-symbol">¥</text>0.00</text><text class="muted block">当前无需转账</text></view>
+    <view class="summary-foot muted">{{tripCount}} 段旅行　 ·　 {{pendingTrips}} 段待结清</view>
   </view>
-  <view wx:if="{{summaryGroups.length}}" class="home-settlement"><text class="section-title">累计待结清</text><view wx:for="{{summaryGroups}}" wx:key="currency" class="home-balance"><text>{{item.currency}}</text><text>待收 {{item.receivable}}</text><text>待付 {{item.payable}}</text></view><text class="section-note">不含记录中 · 不跨旅行抵扣</text></view>
-  <view wx:if="{{loadError}}" class="load-error"><text>{{loadError}}</text></view>
-  <view wx:if="{{loadingTrips}}" class="loading-trips"><text>正在整理旅行账本…</text></view>
-  <view wx:elif="{{trips.length}}" class="trip-list">
-    <view class="section-heading"><text class="section-title">继续记账</text><text class="section-note">最近创建的旅行</text></view>
-    <view wx:for="{{trips}}" wx:key="id" class="travel-stub" data-id="{{item.id}}" data-name="{{item.name}}" data-currency="{{item.default_currency}}" data-owner="{{item.is_owner}}" bindtap="openTrip">
-      <view class="stub-main"><text class="stub-name">{{item.name}}</text><text class="stub-action">{{item.pendingText || '继续录入'}} ›</text></view>
-      <view class="stub-footer"><text>{{item.start_date || '日期待补充'}}{{item.end_date ? ' — ' + item.end_date : ''}} · 成员 {{item.member_count || 1}}/2</text><text class="stub-currency">{{item.default_currency}}</text></view>
-    </view>
-  </view>
-  <view wx:else class="empty-trips">
-    <text class="empty-title">还没有旅行账单</text>
-    <text class="empty-copy">先创建一段旅行，再记录每一笔共同消费。</text>
-    <button class="empty-action" bindtap="toggleCreateForm">创建第一段旅行</button>
-  </view>
-
-  <view class="create-panel">
-    <view wx:if="{{trips.length}}" class="create-trigger" bindtap="toggleCreateForm"><text>新建一段旅行</text><text>{{showCreateForm ? "收起" : "+"}}</text></view>
-    <view wx:if="{{showCreateForm || !trips.length}}" class="create-form">
-      <text class="field-label">旅行名称</text>
-      <input placeholder="例如：东京周末" value="{{name}}" bindinput="onName"/>
-      <text class="field-label">出行日期（可选）</text><calendar-picker id="date-calendar" mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates" compact="{{true}}"/>
-      <view class="currency-row"><text class="field-label">结算币种</text><picker range="{{currencies}}" bindchange="onCurrency"><view class="currency-picker">{{currency}}<text>⌄</text></view></picker></view>
-      <button class="create-button" bindtap="createTrip" loading="{{creating}}" disabled="{{creating}}">创建并录入消费</button>
-    </view>
-  </view>
-  <view wx:if="{{trips.length}}" class="home-actions"><button class="create-button" bindtap="quickExpense">＋ 记一笔</button><button class="home-new" bindtap="toggleCreateForm">新建旅行</button></view>
+  <view class="row list-heading"><text class="section-title">继续记账</text><text class="muted">最近创建</text></view>
+  <text wx:if="{{loading}}" class="muted block empty">正在加载…</text>
+  <view wx:if="{{error}}" class="empty"><text class="error">{{error}}</text><button class="secondary" bindtap="loadTrips">重试</button></view>
+  <view wx:if="{{!loading && !tripCount && !error}}" class="card"><text class="section-title block">还没有旅行账单</text><text class="muted block">先创建一段旅行，再记录每一笔共同消费。</text></view>
+  <view wx:for="{{trips}}" wx:key="id" class="card trip-card row" data-id="{{item.id}}" bindtap="openTrip"><view class="trip-copy"><text class="trip-name block">{{item.name}}</text><text class="muted block">{{item.subtitle}}</text></view><view class="trip-status"><text class="{{item.hasPending ? 'danger' : 'muted'}}">{{item.statusText}}</text><text class="arrow">›</text></view></view>
+  <view class="bottom-bar row"><button class="primary" bindtap="quickExpense">+ 记一笔</button><button class="secondary" bindtap="createTrip">新建旅行</button></view>
 </view>

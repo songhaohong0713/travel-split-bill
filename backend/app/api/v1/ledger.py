@@ -14,7 +14,13 @@ from app.api.v1.trips import (
     _not_found,
     require_trip_member,
 )
-from app.core.ledger import amount, payment_preview, project, snapshot_token
+from app.core.ledger import (
+    amount,
+    payment_preview,
+    project,
+    settlement_basis,
+    snapshot_token,
+)
 from app.db.ledger_reads import member_snapshots
 from app.db.models import ExpenseRecord, TripLedger, TripMember
 from app.db.payment_projection import sync_payments
@@ -55,11 +61,7 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
         ledger = project(old)
         closed = [day for day in ledger["days"] if day["status"] != "recording"]
         pending = []
-        if (
-            closed
-            and ledger["history_status"] != "pending"
-            and all(day["status"] != "invalid" for day in closed)
-        ):
+        if closed and all(day["status"] != "invalid" for day in closed):
             pending = payment_preview(old)["groups"]
         pending = [
             {
@@ -83,6 +85,13 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
                 "pending": pending,
                 "incomplete": any(day["error"] for day in ledger["days"]),
                 "pending_days": sum(day["status"] == "pending" for day in closed),
+                "day_count": len({r["occurred_at"] for r in old["expenses"]}),
+                "latest_expense_date": max(
+                    (r["occurred_at"] for r in old["expenses"]), default=None
+                ),
+                "has_recording": any(
+                    d["status"] == "recording" for d in ledger["days"]
+                ),
                 "history_status": ledger["history_status"],
             }
         )
@@ -234,7 +243,9 @@ async def close_day(
     old = await snapshot(trip_id, request, session, user_id)
     state = deepcopy(old["state"])
     value = day.isoformat()
-    if value not in {r["occurred_at"] for r in old["expenses"]}:
+    if value not in {r["occurred_at"] for r in old["expenses"]} and not any(
+        d["date"] == value and d["carry_entries"] for d in project(old)["days"]
+    ):
         raise HTTPException(
             422, detail={"code": "EMPTY_DAY", "message": "当天没有消费记录"}
         )
@@ -294,14 +305,25 @@ async def mark_payment(
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
         )
+    basis = settlement_basis(old, p, body.currency)
+    basis_dates = {b["date"] for b in basis}
     payment = {
         **group,
         "id": str(uuid4()),
         "created_at": datetime.now(UTC).isoformat(),
         "created_by": user_id,
         "snapshot_token": body.token,
-        "basis_expenses": [
-            record for record in old["expenses"] if record["occurred_at"] in p["dates"]
+        "basis_expenses": deepcopy(old["expenses"]),
+        "freeze_basis": basis,
+        "depends_on": [
+            payment["id"]
+            for payment in old["state"]["payments"]
+            if not payment.get("revoked_at")
+            and payment["currency"] == body.currency
+            and any(
+                a["date"] in basis_dates
+                for a in payment["allocations"] + payment.get("freeze_basis", [])
+            )
         ],
     }
     state = deepcopy(old["state"])

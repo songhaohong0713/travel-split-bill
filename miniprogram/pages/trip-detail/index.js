@@ -1,154 +1,59 @@
-const { createTripInvite, deleteExpense, deleteTrip, listExpenses, listTripMembers, previewSettlement } = require("../../services/api")
-const { memberLabelMap } = require("../../services/member-labels")
-const { getLedger, listTrips, updateTripDates } = require('../../services/api')
-
-function confirmDelete(content) {
-  return new Promise((resolve) => wx.showModal({ title: "确认删除", content, confirmColor: "#C86D45", success: ({ confirm }) => resolve(confirm) }))
-}
-
-function defaultExpenseTitle(now = new Date()) {
-  return `${now.getMonth() + 1}月${now.getDate()}日消费`
-}
-
-function decodeQueryText(value) {
-  try { return decodeURIComponent(String(value || "")) } catch (_) { return String(value || "") }
-}
-
-const memberLabels = memberLabelMap
-
-const { expenseSummary } = require('../../services/expense-summary')
-
-function buildOverview(records, currency) {
-  const summaries = records.map((record) => expenseSummary(record, currency))
-  const included = summaries.filter((record) => record.currency === currency)
-  const cents = included.reduce((total, record) => total + Math.round(Number(record.total) * 100 || 0), 0)
-  return { recordCount: records.length, total: (cents / 100).toFixed(2), currency, mixedCurrency: included.length !== summaries.length }
-}
-
-function validAmount(value) {
-  return /^\d+(\.\d{1,2})?$/.test(String(value || "").trim()) && Number(value) > 0
-}
-
-function buildSettlementPreview(records, currency) {
-  const participants = [...new Set(records.flatMap((record) => record.payload && record.payload.participants || []).map((name) => String(name || "").trim()).filter(Boolean))]
-  const expenses = records.flatMap((record) => record.payload && record.payload.expenses || [])
-    .filter((expense) => Array.isArray(expense.items) && expense.items.length)
-    .map((expense) => ({
-      ...expense,
-      actual_payment: expense.actual_payment && validAmount(expense.actual_payment.amount) ? expense.actual_payment : undefined,
-    }))
-  return participants.length && expenses.length ? { settlement_currency: currency, participants, expenses } : null
-}
-
-function settlementGroups(result, participants, labels = {}) {
-  const groups = result && Array.isArray(result.groups) ? result.groups : result ? [{ currency: ((result.transfers || [])[0] || {}).amount && result.transfers[0].amount.currency || "CNY", ...result }] : []
-  return groups.map((group) => ({
-    currency: group.currency,
-    participants: participants.map((name) => ({
-      name: labels[name] || name,
-      paid: group.paid_by_participant && group.paid_by_participant[name] ? group.paid_by_participant[name].amount : "0.00",
-      responsibility: group.responsibility_by_participant && group.responsibility_by_participant[name] ? group.responsibility_by_participant[name].amount : "0.00",
-    })),
-    transferText: (group.transfers || []).length
-      ? group.transfers.map((transfer) => `${labels[transfer.from_participant_id] || transfer.from_participant_id} 需付给 ${labels[transfer.to_participant_id] || transfer.to_participant_id} ¥${transfer.amount.amount} ${transfer.amount.currency}`).join("；")
-      : `双方已结清 ${group.currency}`,
-  }))
-}
-
+const api=require('../../services/api')
+const ui=require('../../services/ledger-view')
+const {memberLabelMap}=require('../../services/member-labels')
 Page({
-  data: { startDate:"", endDate:"", dateError:"", tripId: "", currency: "CNY", name: "", isOwner: false, memberLabelMap: {}, expenses: [], overview: { recordCount: 0, total: "0.00", currency: "CNY", mixedCurrency: false }, settlementGroups: [], settlementWarning: "", hasLoaded: false, loading: true, creating: false, loadError: "", inviting: false, inviteReady: false, invitePath: "" },
-  onLoad(query) {
-    this.setData({ tripId: query.tripId, currency: query.currency || "CNY", name: decodeQueryText(query.name) || "旅行账本", isOwner: query.isOwner === "1" || query.isOwner === true })
-    const members = typeof listTripMembers === "function" ? listTripMembers(query.tripId).then((rows) => this.setData({ memberLabelMap: memberLabels(rows) })).catch(() => {}) : Promise.resolve()
-    return members.then(() => this.loadExpenses()).then(() => {
-      this.setData({ hasLoaded: true })
-      if (typeof listTrips === 'function') return listTrips().then(trips => {
-        const trip = trips.find(t => t.id === this.data.tripId)
-        if (trip) this.setData({startDate:trip.start_date || '',endDate:trip.end_date || '',isOwner:trip.is_owner,memberCount:trip.member_count})
-      }).catch(() => this.setData({dateLoadError:true}))
-    })
+  data:{dayCount:0,hasSummary:false,tripId:'',name:'',currency:'CNY',subtitle:'',days:[],summary:[],pendingDays:0,isOwner:false,memberCount:1,loading:true,error:'',inviteOpen:false,invitePath:'',inviting:false,inviteError:'',dateOpen:false,startDate:'',endDate:''},
+  async onLoad(q){
+    this.setData({tripId:q.tripId,name:decodeURIComponent(q.name || ''),currency:q.currency || 'CNY'})
+    await this.reload()
+    if(q.dateFailed)wx.showToast({title:'旅行已创建，日期未保存，可在菜单补填',icon:'none'})
+    if(q.inviteGuide==='1' && this.data.isOwner && this.data.memberCount<2)await this.prepareInvite()
   },
-  onShow() { return this.data.hasLoaded ? this.loadExpenses() : Promise.resolve() },
-  loadExpenses() {
-    return listExpenses(this.data.tripId)
-      .then((records) => {
-        this.setData({ expenses: records.map((record) => expenseSummary(record, this.data.currency, this.data.memberLabelMap)), overview: buildOverview(records, this.data.currency), settlementGroups: [], settlementWarning: "", loading: false, loadError: "" })
-        if (typeof getLedger === 'function') {
-          return getLedger(this.data.tripId).then(ledger => {
-            const labels = this.data.memberLabelMap
-            const describe = p => `${labels[p.from_participant_id] || '同行人'} 需付给 ${labels[p.to_participant_id] || '同行人'} ${p.amount} ${p.currency}`
-            this.setData({ dailyLedger: true, summaryText:ledger.history_status === 'pending' ? '历史结算待确认' : (ledger.summary || []).filter(g => !g.offset_only).map(describe).join('；') || '当前无需转账', summaryIncomplete:ledger.summary_incomplete, days: ledger.days.map(day => ({...day, statusLabel: {recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status], pendingText: day.pending.map(describe).join('；') || (day.error ? '需补全消费' : '当前无需转账')})), memberCount: ledger.members.length, ledgerError: '' })
-            return records
-          }).catch(error => { this.setData({dailyLedger:true,ledgerError:error.message || '暂时无法读取每日账单'}); return records })
-        }
-        const preview = buildSettlementPreview(records, this.data.currency)
-        if (!preview || typeof previewSettlement !== "function") {
-          if (records.length) this.setData({ settlementWarning: "补全同行人、分摊或汇率后可查看结算" })
-          return records
-        }
-        return previewSettlement(this.data.tripId, preview)
-          .then((result) => { this.setData({ settlementGroups: settlementGroups(result, preview.participants, this.data.memberLabelMap), settlementWarning: "" }); return records })
-          .catch(() => { this.setData({ settlementGroups: [], settlementWarning: "补全同行人、分摊或汇率后可查看结算" }); return records })
+  onShow(){if(this.loaded)return this.reload()},
+  async reload(){
+    this.setData({loading:true,error:''})
+    try{
+      const [trips,ledger,members,records]=await Promise.all([api.listTrips(),api.getLedger(this.data.tripId),api.listTripMembers(this.data.tripId),api.listExpenses(this.data.tripId)])
+      const trip=trips.find(t=>t.id===this.data.tripId)
+      if(!trip)throw {message:'旅行不存在或你尚未加入'}
+      const labels=memberLabelMap(members)
+      const current=(members.find(m=>m.is_current) || {}).id
+      const describe=p=>p.to_participant_id===current ? '同行人付我' : '我付同行人'
+      const summary=(ledger.summary || []).filter(p=>!p.offset_only).map(p=>({...p,symbol:ui.symbol(p.currency),direction:p.to_participant_id===current?'同行人需付给你':'你需付给同行人'}))
+      const days=ledger.days.map(day=>{
+        const list=records.filter(r=>r.occurred_at===day.date)
+        const pending=(day.pending || []).filter(p=>Number(p.amount)>0)
+        const paid=ledger.payments.filter(p=>!p.revoked_at && p.allocations.some(a=>a.date===day.date))
+        return {...day,title:ui.dateTitle(day.date),original:ui.originalTotals(list),statusLabel:{recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status],balanceText:pending.length?pending.map(p=>`${describe(p)} ${ui.symbol(p.currency)}${p.amount}`).join(' / '):day.status==='settled' && paid.length?'已转 '+paid.map(p=>`${ui.symbol(p.currency)}${ui.dayPayment(p,day.date,ledger.members).amount}`).join(' / '):day.status==='settled'?'无需转账':'',hasCarry:Boolean(day.carry_entries && day.carry_entries.length)}
       })
-      .catch(() => this.setData({ loading: false, loadError: "暂时无法读取消费记录" }))
+      const card=ui.tripCard(trip,{day_count:days.length})
+      this.setData({name:trip.name,currency:trip.default_currency,isOwner:trip.is_owner,memberCount:members.length,subtitle:card.subtitle,startDate:trip.start_date || '',endDate:trip.end_date || '',days,dayCount:days.length,summary,hasSummary:summary.length>0,pendingDays:days.filter(d=>d.status==='pending').length,loading:false,summaryIncomplete:ledger.summary_incomplete})
+      this.loaded=true
+    }catch(e){this.setData({loading:false,error:e.message || '账单暂时无法加载，请重试',summary:[],days:[]})}
   },
-  openExpense(event) {
-    const { id } = event.currentTarget.dataset
-    wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}&expenseId=${encodeURIComponent(id)}` })
+  addExpense(){ui.newExpense({id:this.data.tripId,default_currency:this.data.currency})},
+  openDay(e){wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${e.currentTarget.dataset.date}&name=${encodeURIComponent(this.data.name)}`})},
+  settleTrip(){wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&name=${encodeURIComponent(this.data.name)}`})},
+  async prepareInvite(){
+    if(!this.data.isOwner || this.data.memberCount>=2 || this.data.inviting)return
+    this.setData({inviteOpen:true,inviting:true,inviteError:'',invitePath:''})
+    try{const invite=await api.createTripInvite(this.data.tripId);this.setData({invitePath:`/pages/trip-invite/index?token=${encodeURIComponent(invite.token)}`})}
+    catch(e){this.setData({inviteError:e.message || '邀请创建失败，请重试'})}
+    finally{this.setData({inviting:false})}
   },
-  openDay(e) { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${e.currentTarget.dataset.date}&name=${encodeURIComponent(this.data.name)}`}) },
-  settleTrip() { wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&name=${encodeURIComponent(this.data.name)}`}) },
-  onTravelDates(e) { this.setData({startDate:e.detail.start,endDate:e.detail.end}) },
-  onTripStart(e) { this.setData({startDate:e.detail.value}) },
-  onTripEnd(e) { this.setData({endDate:e.detail.value}) },
-  saveTripDates() {
-    if (this.data.savingDates) return Promise.resolve()
-    if (this.data.startDate && this.data.endDate && this.data.startDate > this.data.endDate) return wx.showToast({title:'结束日期不能早于开始日期',icon:'none'})
-    this.setData({savingDates:true,dateError:''})
-    return updateTripDates(this.data.tripId,{start_date:this.data.startDate || null,end_date:this.data.endDate || null})
-      .then(() => wx.showToast({title:'日期已保存',icon:'success'})).catch(() => this.setData({dateError:'日期暂未保存，请稍后重试'})).finally(() => this.setData({savingDates:false}))
+  closeInvite(){this.setData({inviteOpen:false})},
+  onShareAppMessage(){return {title:`邀请你加入「${this.data.name}」一起记账`,path:this.data.invitePath || ui.tripUrl({id:this.data.tripId,name:this.data.name,default_currency:this.data.currency})}},
+  menu(){
+    if(!this.data.isOwner)return
+    wx.showActionSheet({itemList:['修改出行日期','删除旅行'],success:async({tapIndex})=>{
+      if(tapIndex===0){this.setData({dateOpen:true});return}
+      if(await ui.confirm('将永久删除这段旅行及全部消费、邀请和结算记录。','删除旅行')){
+        try{await api.deleteTrip(this.data.tripId);wx.navigateBack()}
+        catch(e){wx.showToast({title:e.message || '删除失败',icon:'none'})}
+      }
+    }})
   },
-  chooseReceiptAndCreate() {
-    if (this.data.creating) return Promise.resolve()
-    return new Promise((resolve) => wx.chooseMedia({ count: 1, mediaType: ["image"], sourceType: ["camera", "album"], success: ({ tempFiles }) => {
-      const receiptPath = tempFiles[0].tempFilePath
-      wx.compressImage({ src: receiptPath, quality: 80, success: ({ tempFilePath }) => { getApp().globalData.pendingReceiptPath = tempFilePath; resolve(this.createExpenseRecord()) }, fail: () => { getApp().globalData.pendingReceiptPath = receiptPath; resolve(this.createExpenseRecord()) } })
-    }, fail: () => resolve() }))
-  },
-  createExpenseRecord() {
-    if (this.data.creating) return Promise.resolve()
-    this.setData({ creating: true })
-    wx.navigateTo({ url: `/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&currency=${encodeURIComponent(this.data.currency)}` })
-    this.setData({ creating: false })
-    return Promise.resolve()
-  },
-  prepareInvite() {
-    if (this.data.inviting) return Promise.resolve()
-    this.setData({ inviting: true, inviteReady: false, invitePath: "" })
-    return createTripInvite(this.data.tripId)
-      .then((invite) => this.setData({ inviteReady: true, invitePath: `/pages/trip-invite/index?token=${encodeURIComponent(invite.token)}` }))
-      .catch((error) => wx.showToast({ title: error.message || "创建邀请失败", icon: "none" }))
-      .finally(() => this.setData({ inviting: false }))
-  },
-  deleteExpenseRecord(event) {
-    const { id } = event.currentTarget.dataset
-    const expense = this.data.expenses.find((item) => item.id === id)
-    if (!this.data.isOwner && !(expense && expense.isCreator)) return Promise.resolve()
-    return confirmDelete("删除后无法恢复这笔消费记录。")
-      .then((confirmed) => confirmed ? deleteExpense(this.data.tripId, id) : null)
-      .then((result) => result === null ? null : this.loadExpenses())
-      .catch((error) => wx.showToast({ title: error.message || "删除失败", icon: "none" }))
-  },
-  deleteTripRecord() {
-    if (!this.data.isOwner) return Promise.resolve()
-    return confirmDelete("将永久删除全部消费、邀请和结算记录。")
-      .then((confirmed) => confirmed ? deleteTrip(this.data.tripId) : null)
-      .then((result) => { if (result !== null) wx.navigateBack() })
-      .catch((error) => wx.showToast({ title: error.message || "删除失败", icon: "none" }))
-  },
-  onShareAppMessage() {
-    return { title: "邀请你一起记旅行账", path: this.data.invitePath }
-  },
+  onDates(e){this.setData({startDate:e.detail.start,endDate:e.detail.end})},
+  async saveDates(){try{await api.updateTripDates(this.data.tripId,{start_date:this.data.startDate || null,end_date:this.data.endDate || null});this.setData({dateOpen:false});await this.reload()}catch(e){this.setData({error:e.message || '日期保存失败'})}},
+  closeDates(){this.setData({dateOpen:false})},stop(){},
 })
-
-if (typeof module !== "undefined") module.exports = { buildOverview, buildSettlementPreview, decodeQueryText, defaultExpenseTitle, expenseSummary, memberLabels, settlementGroups }

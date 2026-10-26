@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -79,7 +80,7 @@ def test_paid_200_then_230_only_30_and_revoke(ledger):
     saved, body = expense(c, base)
     assert (
         c.get(base + "/ledger", headers=auth()).json()["data"]["days"][0]["status"]
-        == "recording"
+        == "pending"
     )
     assert c.post(base + "/days/2026-10-07/close", headers=auth("b")).status_code == 200
     p = preview(c, base)
@@ -100,6 +101,10 @@ def test_paid_200_then_230_only_30_and_revoke(ledger):
         ).status_code
         == 200
     )
+    c.post(
+        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
+        headers=auth(),
+    )
     assert preview(c, base)["groups"][0]["amount"] == "30.00"
     assert (
         c.post(base + f"/payments/{payment_id}/revoke", headers=auth()).status_code
@@ -112,7 +117,7 @@ def test_global_offsets_days_and_excludes_recording(ledger):
     c, base = ledger
     expense(c, base, "200", "2026-10-05", "b")
     expense(c, base, "300", "2026-10-06")
-    expense(c, base, "1000", "2026-10-07")
+    expense(c, base, "1000", datetime.now(UTC).date().isoformat())
     for day in ("2026-10-05", "2026-10-06"):
         c.post(base + f"/days/{day}/close", headers=auth())
     p = preview(c, base)
@@ -121,7 +126,7 @@ def test_global_offsets_days_and_excludes_recording(ledger):
     assert pay(c, base, p).status_code == 201
     days = c.get(base + "/ledger", headers=auth()).json()["data"]["days"]
     assert {d["date"]: d["status"] for d in days} == {
-        "2026-10-07": "recording",
+        datetime.now(UTC).date().isoformat(): "recording",
         "2026-10-06": "settled",
         "2026-10-05": "settled",
     }
@@ -149,6 +154,10 @@ def test_overpayment_becomes_reverse_refund_and_currencies_stay_separate(ledger)
     body["payload"]["expenses"][0]["items"][0]["amount"]["amount"] = "360"
     c.patch(
         base + "/expenses/" + saved["id"], headers=auth(), json={**body, "revision": 1}
+    )
+    c.post(
+        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
+        headers=auth(),
     )
     group = preview(c, base)["groups"][0]
     assert (
@@ -187,6 +196,10 @@ def test_deleted_paid_expense_leaves_refund_and_trip_can_be_deleted(ledger):
     pay(c, base, preview(c, base))
     assert (
         c.delete(base + "/expenses/" + saved["id"], headers=auth()).status_code == 204
+    )
+    c.post(
+        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
+        headers=auth(),
     )
     assert preview(c, base)["groups"][0]["from_participant_id"] == "a"
     assert c.delete(base, headers=auth()).status_code == 204
@@ -240,7 +253,7 @@ def test_history_partial_confirmation_is_explicit_and_does_not_double_count(ledg
         == "pending"
     )
     assert (
-        c.post(base + "/payments/preview", headers=auth(), json={}).status_code == 422
+        c.post(base + "/payments/preview", headers=auth(), json={}).status_code == 200
     )
     selection = {
         "mode": "partial",
@@ -461,3 +474,50 @@ def test_unpaid_history_keeps_confirmation_basis_after_expense_deletion(ledger):
         assert confirmation["basis_expenses"][0]["revision"] == 1
         assert confirmation["selection"]["mode"] == "unpaid"
         assert confirmation["basis_members"] == ["a", "b"]
+
+
+def test_unknown_history_remains_visible_and_current_actual_payment_is_allowed(ledger):
+    c, base = ledger
+    expense(c, base)
+    c.post(base + "/history/prepare", headers=auth())
+    summary = c.get("/v1/trips/ledger-summary", headers=auth()).json()["data"]["trips"][
+        0
+    ]
+    assert summary["pending"][0]["amount"] == "200.00"
+    assert summary["day_count"] == 1
+    assert summary["latest_expense_date"] == "2026-10-07"
+    assert summary["has_recording"] is False
+    result = pay(c, base, preview(c, base))
+    assert result.status_code == 201
+    day = c.get(base + "/ledger", headers=auth()).json()["data"]["days"][0]
+    assert day["status"] == "settled"
+    assert day["original_totals"][0]["amount"] == "400.00"
+    assert day["settled_transfers"][0]["created_by"] == "b"
+
+
+def test_revoking_unrelated_day_does_not_thaw_another_settled_day(ledger):
+    c, base = ledger
+    expense(c, base, "200", "2026-10-05")
+    first = pay(c, base, preview(c, base, ["2026-10-05"])).json()["data"]
+    saved, body = expense(c, base, "400", "2026-10-06")
+    second = pay(c, base, preview(c, base, ["2026-10-06"])).json()["data"]
+    assert second["depends_on"] == []
+    c.post(base + "/payments/" + first["id"] + "/revoke", headers=auth())
+    body["payload"]["expenses"][0]["items"][0]["amount"]["amount"] = "460"
+    assert (
+        c.patch(
+            base + "/expenses/" + saved["id"],
+            headers=auth(),
+            json={**body, "revision": 1},
+        ).status_code
+        == 200
+    )
+    days = {
+        d["date"]: d
+        for d in c.get(base + "/ledger", headers=auth()).json()["data"]["days"]
+    }
+    assert days["2026-10-06"]["status"] == "settled"
+    assert (
+        days[datetime.now(UTC).date().isoformat()]["carry_entries"][0]["amount"]
+        == "30.00"
+    )

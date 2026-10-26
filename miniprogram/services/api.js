@@ -12,7 +12,7 @@ function rawRequest(path, options = {}) {
       url: `${app.globalData.apiBaseUrl}${path}`,
       method: options.method || "GET",
       data: options.data,
-      header: { ...authorizationHeader(), ...(options.header || {}) },
+      header: { "X-Client-Timezone-Offset": String(new Date().getTimezoneOffset()), ...authorizationHeader(), ...(options.header || {}) },
       success(response) {
         if (response.statusCode >= 200 && response.statusCode < 300) return resolve(response.data.data)
         reject({ ...(response.data && response.data.error || { code: "NETWORK_ERROR", message: "请求未完成" }), statusCode: response.statusCode })

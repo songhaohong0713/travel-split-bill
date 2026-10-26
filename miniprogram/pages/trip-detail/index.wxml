@@ -1,37 +1,13 @@
-<view class="page trip-detail-page">
-  <view class="masthead"><text class="kicker">旅行账本</text><text class="title">{{name}}</text><text class="subtitle">{{startDate || '日期待补充'}}{{endDate ? ' — ' + endDate : ''}} · 成员 {{memberCount || 1}}/2</text></view>
-  <view wx:if="{{loading}}" class="state-card"><text>正在整理消费记录…</text></view>
-  <view wx:elif="{{loadError}}" class="state-card error"><text>{{loadError}}</text></view>
-  <view wx:if="{{dailyLedger}}" class="daily-ledger">
-    <view class="ledger-card ledger-hero"><text class="ledger-section">累计待结清</text><text class="trip-pending">{{summaryIncomplete ? '请先补全消费数据' : summaryText}}</text><text class="ledger-muted">不含记录中的日期 · 成员 {{memberCount}}/2</text><button class="ledger-secondary" bindtap="settleTrip">查看并结清当前旅行</button></view>
-    <view class="list-heading"><text class="section-title">每日账单</text><text class="section-note">共 {{days.length}} 天</text></view>
-    <view wx:for="{{days}}" wx:key="date" class="ledger-card" data-date="{{item.date}}" bindtap="openDay"><view class="summary-top"><text class="expense-title">{{item.date}}</text><text class="ledger-badge">{{item.statusLabel}}</text></view><text class="ledger-muted">{{item.count}} 笔 · {{item.pendingText}} ›</text></view>
-  </view>
-  <block wx:elif="{{expenses.length}}">
-  <view class="settlement-overview">
-    <view class="list-heading"><text class="section-title">待结清</text><text class="section-note">按已保存消费计算</text></view>
-    <text wx:if="{{settlementWarning}}" class="settlement-warning">{{settlementWarning}}</text>
-    <view wx:for="{{settlementGroups}}" wx:key="currency" class="settlement-group">
-      <text class="settlement-currency">{{item.currency}}</text>
-      <view class="settlement-head"><text>成员</text><text>实际支付</text><text>应承担</text></view>
-      <view wx:for="{{item.participants}}" wx:for-item="participant" wx:key="name" class="settlement-person"><text>{{participant.name}}</text><text>¥{{participant.paid}}</text><text>¥{{participant.responsibility}}</text></view>
-      <text class="transfer-result">{{item.transferText}}</text>
-    </view>
-  </view>
-  <view class="trip-overview"><text class="overview-label">旅行总消费</text><view><text class="overview-total">¥{{overview.total}}</text><text class="overview-currency">{{overview.currency}}</text></view><text class="overview-note">已记录 {{overview.recordCount}} 笔消费</text><text wx:if="{{overview.mixedCurrency}}" class="overview-warning">其他币种仅在单笔账单中展示，未重复相加</text></view>
-  <view class="expense-list">
-    <view class="list-heading"><text class="section-title">消费记录</text><text class="section-note">共 {{expenses.length}} 笔</text></view>
-    <view wx:for="{{expenses}}" wx:key="id" class="expense-summary" data-id="{{item.id}}" bindtap="openExpense">
-      <view class="summary-top"><text class="expense-title">{{item.title}}</text><view><text class="amount-label">{{item.amountLabel}}</text><text class="amount">¥{{item.total}}</text><text class="currency">{{item.currency}}</text><text wx:if="{{item.originalTotal}}" class="original-amount">商品小计 ¥{{item.originalTotal}} {{item.originalCurrency}}</text></view></view>
-      <text class="expense-meta">{{item.occurredAt}} · {{item.itemCount}} 项 · {{item.payer || "待填写付款人"}}</text>
-      <view class="expense-actions"><text class="expense-preview">查看商品与分账 ›</text><text wx:if="{{isOwner || item.isCreator}}" class="delete-link" data-id="{{item.id}}" catchtap="deleteExpenseRecord">删除</text></view>
-    </view>
-  </view>
+<view class="screen">
+  <view class="heading"><view class="row"><text class="title trip-title">{{name}}</text><view class="row"><button wx:if="{{isOwner && memberCount < 2}}" class="chip invite" bindtap="prepareInvite">邀请</button><button wx:if="{{isOwner}}" class="menu" bindtap="menu">···</button></view></view><text class="muted block">{{subtitle}}</text></view>
+  <text wx:if="{{loading}}" class="muted block">正在加载…</text><view wx:if="{{error}}"><text class="error">{{error}}</text><button class="secondary" bindtap="reload">重试</button></view>
+  <block wx:if="{{!loading && !error}}">
+    <view class="card hero"><view class="row"><text class="muted">累计待结清</text><text class="muted">不含记录中</text></view><block wx:if="{{hasSummary}}"><view wx:for="{{summary}}" wx:key="currency"><text class="hero-value">{{item.symbol}}{{item.amount}}<text class="unit">{{item.currency}}</text></text><text class="muted block">{{item.direction}} · {{pendingDays}} 天未结清</text></view></block><block wx:else><text class="hero-value">{{summaryIncomplete ? '需补全' : '¥0.00'}}</text><text class="muted block">{{summaryIncomplete ? '请打开对应日期修正消费' : '当前无需转账'}}</text></block><button wx:if="{{pendingDays >= 2}}" class="secondary" bindtap="settleTrip">合并结清 {{pendingDays}} 天</button></view>
+    <view class="row list-heading"><text class="section-title">每日账单</text><text class="muted">共 {{dayCount}} 天</text></view>
+    <view wx:if="{{!dayCount}}" class="card empty"><text class="section-title block">还没有消费记录</text><text class="muted block">记下第一笔消费，日账单会自动生成</text></view>
+    <view wx:for="{{days}}" wx:key="date" class="card day-card" data-date="{{item.date}}" bindtap="openDay"><view class="row"><text class="day-title">{{item.title}}</text><text class="badge {{item.status}}">{{item.statusLabel}}</text></view><view class="row day-foot"><text class="muted">{{item.count}} 笔{{item.original ? ' · ' + item.original : ''}}<text wx:if="{{item.hasCarry}}"> · 含补差额</text></text><text class="day-balance">{{item.balanceText}} ›</text></view></view>
   </block>
-  <view wx:else class="empty-state"><text class="empty-title">还没有消费记录</text><text class="empty-copy">先记下第一笔消费，再逐项分账。</text></view>
-  <view class="actions"><button class="primary" bindtap="chooseReceiptAndCreate" loading="{{creating}}" disabled="{{creating}}">拍小票，记录消费</button><button class="secondary" bindtap="createExpenseRecord" loading="{{creating}}" disabled="{{creating}}">手动录入</button></view>
-  <button wx:if="{{isOwner && memberCount !== 2}}" class="invite-button" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">邀请同行人</button>
-  <button wx:if="{{inviteReady}}" class="share-button" open-type="share">发送邀请</button>
-  <view wx:if="{{isOwner}}" class="ledger-card trip-date-editor"><text class="ledger-section">出行日期（可选）</text><calendar-picker id="date-calendar" mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onTravelDates"/><button class="ledger-secondary" bindtap="saveTripDates" loading="{{savingDates}}" disabled="{{savingDates}}">保存日期</button><text class="ledger-error">{{dateError}}</text></view>
-  <button wx:if="{{isOwner}}" class="delete-trip-button" bindtap="deleteTripRecord">删除这段旅行</button>
+  <view class="bottom-bar"><button class="primary" bindtap="addExpense">+ 记一笔</button></view>
+  <view wx:if="{{inviteOpen}}" class="sheet-cover" bindtap="closeInvite"><view class="sheet" catchtap="stop"><text class="section-title block">邀请同行人</text><text class="muted block invite-copy">把邀请卡片发给同行人，加入后就能共同记账。</text><text wx:if="{{inviteError}}" class="error">{{inviteError}}</text><button wx:if="{{invitePath}}" class="primary" open-type="share">发送邀请</button><button wx:else class="primary" bindtap="prepareInvite" loading="{{inviting}}" disabled="{{inviting}}">{{inviting ? '正在准备邀请' : '重新生成邀请'}}</button><button class="skip" bindtap="closeInvite">稍后邀请</button></view></view>
+  <view wx:if="{{dateOpen}}" class="sheet-cover" bindtap="closeDates"><view class="sheet" catchtap="stop"><text class="section-title block">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onDates"/><button class="primary" bindtap="saveDates">保存日期</button></view></view>
 </view>

@@ -1,0 +1,2 @@
+@import "../../styles/round2.wxss";
+.heading .title {font-size:46rpx;}.intro {margin-top:10rpx;}.field {margin-top:32rpx;}.hint {font-size:23rpx;margin-top:12rpx;}

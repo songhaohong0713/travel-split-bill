@@ -1,1 +1,1 @@
-{"navigationBarTitleText": "旅行账本", "usingComponents": {"calendar-picker": "../../components/calendar-picker/calendar-sheet"}}
+{"navigationBarTitleText":"旅行详情","usingComponents":{"calendar-picker":"../../components/calendar-picker/calendar-sheet"}}

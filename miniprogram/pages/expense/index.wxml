@@ -1,81 +1,37 @@
-<view class="page expense-page">
-  <view wx:if="{{reading}}" class="expense-reading">
-    <view class="masthead"><text class="kicker">消费详情</text><text class="reading-title">{{title}}</text><text class="expense-date">{{occurredAt}}</text></view>
-    <view class="reading-total"><text>{{checkoutLabel}}</text><view><text class="reading-amount">¥{{checkoutAmount}}</text><text class="currency">{{checkoutCurrency}}</text></view><text wx:if="{{currency !== checkoutCurrency}}" class="reading-original">商品小计 ¥{{billTotal}} {{currency}}</text></view>
-    <view class="reading-card"><text class="section-title">付款与结算</text><view class="reading-line"><text>付款人</text><text>{{payerLabel || payer}}</text></view><view class="reading-line"><text>结算方式</text><text wx:if="{{actualPaymentAmount}}">实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}}</text><text wx:elif="{{currency === settlementCurrency}}">原币结算</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}}</text><text wx:else>待补充汇率</text></view><view class="responsibility-list"><view wx:for="{{responsibilityRows}}" wx:key="id" class="reading-line"><text>{{item.label}}应承担</text><text>¥{{item.amount}} {{item.currency}}</text></view></view><text wx:if="{{expenseAdvanceText}}" class="advance-note">{{expenseAdvanceText}}</text></view>
-    <view class="reading-card"><view class="list-heading"><text class="section-title">商品明细</text><text class="summary-note">共 {{items.length}} 项</text></view><view wx:for="{{items}}" wx:key="id" class="reading-item"><view><text class="reading-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-meta">{{item.allocationMode === 'payer' ? '付款人承担' : item.allocationMode === 'friend' ? '同行人承担' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text></view><view><text class="compact-item-amount">¥{{item.amount}}</text><text class="currency">{{currency}}</text></view></view></view>
-    <view wx:if="{{taxAmount || adjustmentAmount}}" class="reading-card"><text class="section-title">账单调整</text><view wx:if="{{taxAmount}}" class="reading-line"><text>税额</text><text>¥{{taxAmount}} {{currency}}</text></view><view wx:if="{{adjustmentAmount}}" class="reading-line"><text>{{adjustmentLabels[adjustmentType]}}</text><text>¥{{adjustmentAmount}} {{currency}}</text></view></view>
-    <button class="reading-edit" bindtap="beginEditing">编辑此笔消费</button>
+<view class="screen expense-screen">
+ <view wx:if="{{reading || expenseId}}" class="page-heading"><text class="title">{{reading ? '消费详情' : expenseId ? '编辑消费' : '记一笔'}}</text><button wx:if="{{reading}}" class="text-button" bindtap="beginEditing">编辑</button></view>
+ <text wx:if="{{receiptRecognized}}" class="receipt-tag">已识别小票，请确认</text>
+ <view class="amount-card card">
+  <input class="merchant" placeholder="商户 / 消费名称（可选）" value="{{title}}" disabled="{{reading}}" data-field="title" bindinput="onField" />
+  <view class="amount-line"><text class="amount-symbol">{{amountSymbol}}</text><input class="amount-input" type="digit" placeholder="0.00" value="{{amount}}" disabled="{{reading}}" data-field="amount" bindinput="onField" /></view>
+  <picker disabled="{{reading}}" range="{{currencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><text class="currency chip">{{currency}} ⌄</text></picker>
+  <text wx:if="{{ocrStatus && !receiptRecognized}}" class="ocr-note">{{ocrStatus}}</text>
+ </view>
+ <view class="card field-card">
+  <view class="field-row"><text class="muted">旅行</text><picker disabled="{{reading || expenseId}}" range="{{tripNames}}" value="{{tripIndex}}" bindchange="onTrip"><text>{{tripName}} <text wx:if="{{tripOngoing}}" class="badge">进行中</text> ⌄</text></picker></view>
+  <view class="field-row date-row"><text class="muted">日期</text><view wx:if="{{!reading}}" class="date-options"><button class="chip {{dateChoice === 'today' ? 'date-selected' : ''}}" data-offset="0" bindtap="quickDate">今天</button><button class="chip {{dateChoice === 'yesterday' ? 'date-selected' : ''}}" data-offset="1" bindtap="quickDate">昨天</button></view><view wx:if="{{!reading}}" class="calendar-option {{dateChoice === 'calendar' ? 'date-selected' : ''}}"><calendar-sheet wx:if="{{!reading}}" value="{{occurredAt}}" bindselect="onDate" /></view><text wx:if="{{reading}}">{{occurredAt}}</text><text wx:if="{{dateFromReceipt}}" class="badge">来自小票</text></view>
+  <view class="field-row"><text class="muted">付款人</text><picker wx:if="{{!reading}}" range="{{memberLabels}}" value="{{payerIndex}}" bindchange="onPayer"><text>{{memberLabels[payerIndex] || '等待成员'}} ⌄</text></picker><text wx:else>{{memberLabels[payerIndex]}}</text></view>
+ <view class="split-card"><view class="row"><text class="muted">分摊</text>
+  <view wx:if="{{!reading}}" class="split-tabs"><button class="{{splitMode === 'even' ? 'active' : ''}}" data-mode="even" bindtap="onSplit">平分</button><button class="{{splitMode === 'custom' ? 'active' : ''}}" data-mode="custom" bindtap="onSplit">自定义</button></view></view>
+  <view wx:if="{{!reading && splitMode === 'custom'}}" class="percent-row"><text>我承担</text><input type="digit" value="{{selfPercent}}" bindinput="onPercent" /><text>%</text></view>
+  <view class="share-preview"><text wx:for="{{responsibilityRows}}" wx:key="id">{{item.label}} {{amountSymbol}}{{item.amount}}</text></view>
+  <view wx:if="{{memberCount === 1}}" class="pending-note"><text>同行人未加入，双人分摊需邀请后保存</text><button wx:if="{{!reading}}" class="text-button" bindtap="selfOnly">自己承担 100%</button></view>
+  <text wx:if="{{expenseId && !splitChanged}}" class="muted small">已保留原有商品分摊、税费和优惠</text>
+ </view>
+ </view>
+ <view class="more-heading card" data-field="showMore" bindtap="toggle"><view><text class="block">更多选项</text><text class="muted small">币种换算 · 商品明细 · 账单调整</text></view><text>{{showMore ? '⌃' : '⌄'}}</text></view>
+ <view wx:if="{{showMore}}" class="card more-card">
+  <view class="optional-heading" data-field="showConversion" bindtap="toggle"><text>币种换算</text><text>{{showConversion ? '−' : '+'}}</text></view>
+  <view wx:if="{{showConversion}}" class="optional-body"><text class="muted small">实际支付可选；填写后用于结算</text><view class="input-row"><picker disabled="{{reading}}" range="{{currencies}}" value="{{actualCurrencyIndex}}" bindchange="onActualCurrency">{{actualPaymentCurrency}} ⌄</picker><input disabled="{{reading}}" type="digit" placeholder="实际支付金额（可选）" value="{{actualPaymentAmount}}" data-field="actualPaymentAmount" bindinput="onField" /></view><text class="muted small">{{rateStatus}} · {{referenceRate || '—'}} {{currency}} → {{settlementCurrency}}</text></view>
+  <view class="optional-heading" data-field="showItems" bindtap="toggle"><text>商品明细 <text class="muted">（可选）</text></text><text>{{showItems ? '−' : '+'}}</text></view>
+  <view wx:if="{{showItems}}" class="optional-body"><text class="muted small">明细金额合计须等于顶部消费金额；税费和优惠另列</text>
+   <view wx:for="{{items}}" wx:key="id" class="item-editor"><view class="input-row"><input disabled="{{reading}}" placeholder="商品名称" value="{{item.name}}" data-id="{{item.id}}" data-field="name" bindinput="onItem" /><input disabled="{{reading}}" type="digit" placeholder="商品金额" value="{{item.amount}}" data-id="{{item.id}}" data-field="amount" bindinput="onItem" /></view><text wx:if="{{item.raw.tax_amount}}" class="muted small">原税额 {{item.raw.tax_amount.amount}}（{{item.raw.tax_included ? '已含' : '另计'}}）</text><view wx:if="{{!reading}}" class="item-actions"><button class="text-button" data-id="{{item.id}}" bindtap="itemCustom">{{item.custom ? '使用整单分摊' : '自定义此项比例'}}</button><button class="text-button danger" data-id="{{item.id}}" bindtap="removeItem">移除</button></view><view wx:if="{{item.custom}}" class="percent-row"><text>我承担</text><input disabled="{{reading}}" type="digit" value="{{item.selfPercent}}" data-id="{{item.id}}" data-field="selfPercent" bindinput="onItem" /><text>%</text></view></view>
+   <button wx:if="{{!reading}}" class="secondary" bindtap="addItem">＋ 添加商品</button>
   </view>
-  <view wx:else class="expense-editor">
-  <view class="masthead">
-    <text wx:if="{{receiptRecognized}}" class="recognized-pill">✓ 已识别小票，请确认</text>
-    <input class="expense-title-input" value="{{title}}" bindinput="onTitle" placeholder="消费名称"/>
-    <view class="quick-amount"><text>¥</text><input wx:if="{{items.length === 1}}" type="digit" value="{{items[0].amount}}" placeholder="0.00" bindinput="onQuickAmount"/><text wx:else>{{billTotal}}</text></view>
-    <picker range="{{settlementCurrencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><view class="quick-currency">{{currency}} ⌄</view></picker>
-    <view class="quick-dates"><button size="mini" data-offset="0" bindtap="quickDate">今天</button><button size="mini" data-offset="1" bindtap="quickDate">昨天</button></view>
-    <calendar-picker id="date-calendar" value="{{occurredAt}}" hint="{{dateFromReceipt ? '来自小票' : ''}}" bindselect="onOccurredAt"/>
-  </view>
-  <view class="bill-summary">
-    <view class="expense-trip-row"><text class="field-label">旅行</text><picker wx:if="{{!expenseId && tripOptions.length}}" range="{{tripNames}}" value="{{tripIndex}}" bindchange="onTripSelection"><view>{{tripName}} {{tripOngoing ? '进行中' : ''}} ⌄</view></picker><text wx:else>{{tripName || '当前旅行'}}</text></view>
-    <view class="summary-head"><text class="section-title">同行信息</text><text class="summary-note">同行人可留空</text></view>
-    <view class="people-grid">
-      <view class="person-field"><text class="field-label">付款人</text><picker wx:if="{{memberOptions.length}}" range="{{memberLabels}}" value="{{payerIndex}}" bindchange="onPayerMember"><view class="member-picker">{{payerLabel || "我"}} ⌄</view></picker><input wx:else placeholder="例如：我" value="{{payer}}" bindinput="onPayer"/></view>
-      <view class="person-field"><text class="field-label">同行人</text><text class="member-readonly">{{friendLabel || "仅付款人"}}</text></view>
-    </view>
-  </view>
-  <view wx:if="{{friend}}" class="quick-allocation"><text>分摊</text><button size="mini" bindtap="quickSplit">平分</button><button size="mini" bindtap="customSplit">自定义</button></view>
-  <view class="quick-responsibilities"><view wx:for="{{responsibilityRows}}" wx:key="id"><text>{{item.label}}</text><text>{{item.amount}} {{item.currency}}</text></view></view>
-  <view class="more-toggle" bindtap="toggleMore"><text>更多选项</text><text class="small-note">币种换算 · 商品明细 · 账单调整 {{showMore ? '⌃' : '⌄'}}</text></view>
-  <view wx:if="{{showMore}}">
-  <view class="receipt-section">
-    <view class="receipt-copy"><text class="section-title">票据附件</text><text class="receipt-status">{{ocrStatus}}</text></view>
-    <button class="receipt-button" bindtap="chooseReceipt">拍小票，记录消费</button>
-    <image wx:if="{{receiptPath}}" class="receipt" src="{{receiptPath}}" mode="widthFix"/>
-  </view>
-  <view class="ticket-list">
-    <view class="list-heading"><text class="section-title">商品条目</text><view class="list-actions"><text class="summary-note">共 {{items.length}} 项</text><text class="batch-toggle" bindtap="toggleBatchEditing">{{batchEditing ? "完成批量编辑" : "批量编辑"}}</text></view></view>
-    <view class="expense-currency-row"><text class="field-label">消费币种</text><picker range="{{settlementCurrencies}}" value="{{currencyIndex}}" bindchange="onCurrency"><view class="expense-currency-picker">{{currency}}<text>⌄</text></view></picker></view>
-    <view wx:if="{{showBatchTools && friend}}" class="batch-toolbar">
-      <view class="batch-toolbar-heading"><text>已选 {{selectedCount}} 项</text><text class="batch-finish" bindtap="toggleBatchEditing">完成</text></view>
-      <picker range="{{batchModes}}" value="{{batchModeIndex}}" bindchange="onBatchMode"><view class="batch-toolbar-picker">{{batchModes[batchModeIndex]}}<text class="chevron">⌄</text></view></picker>
-      <view wx:if="{{batchModeIndex === 3}}" class="ratio-row"><input type="digit" value="{{batchPayerPercent}}" bindinput="onBatchPayerPercent"/><text>% 付款人</text><input type="digit" value="{{batchFriendPercent}}" bindinput="onBatchFriendPercent"/><text>% 同行人</text></view>
-      <button class="batch-apply" bindtap="applyBatchAllocation">应用到已选商品</button>
-    </view>
-    <view class="item-ledger">
-    <view wx:for="{{items}}" wx:key="id" class="ledger-row" data-id="{{item.id}}" bindtap="toggleItemDetail">
-      <view class="compact-item-row"><checkbox wx:if="{{batchEditing}}" class="item-select" checked="{{item.selected}}" data-id="{{item.id}}" catchtap="toggleItem" color="#124954"/><view class="compact-item-copy"><text class="compact-item-name">{{item.name || "未命名商品"}}</text><text class="compact-item-meta">{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}</text></view><view class="compact-item-total"><text class="compact-item-amount">¥{{item.amount || "0.00"}}</text><text class="currency">{{currency}}</text></view><text class="chevron">{{expandedItemId === item.id ? "⌃" : "›"}}</text></view>
-      <view wx:if="{{expandedItemId === item.id}}" class="item-editor" catchtap="stopItemEditorTap">
-        <input class="item-name" placeholder="商品名称，例如：晚餐" value="{{item.name}}" data-id="{{item.id}}" bindinput="onItemName"/>
-        <view class="amount-row"><text class="currency-mark">¥</text><input class="amount-input" type="digit" placeholder="0.00" value="{{item.amount}}" data-id="{{item.id}}" bindinput="onItemAmount"/><text class="currency-code">{{currency}}</text></view>
-        <picker wx:if="{{friend}}" range="{{batchModes}}" value="{{item.allocationMode === 'payer' ? 0 : item.allocationMode === 'friend' ? 1 : item.allocationMode === 'split' ? 2 : 3}}" data-id="{{item.id}}" bindchange="onItemMode"><view class="allocation-picker">{{item.allocationMode === 'payer' ? '付款人自己买' : item.allocationMode === 'friend' ? '同行人自己买' : item.allocationMode === 'split' ? '两人均分' : '自定义比例'}}<text class="chevron">⌄</text></view></picker>
-        <text wx:else class="allocation-picker">付款人自己买</text>
-        <view wx:if="{{item.allocationMode === 'custom'}}" class="ratio-row"><input type="digit" value="{{item.payerPercent}}" data-id="{{item.id}}" bindinput="onItemPayerPercent"/><text>% 付款人</text><input type="digit" value="{{item.friendPercent}}" data-id="{{item.id}}" bindinput="onItemFriendPercent"/><text>% 同行人</text></view>
-        <button class="remove-button" size="mini" disabled="{{items.length === 1}}" data-id="{{item.id}}" catchtap="removeItem">删除商品</button>
-      </view>
-    </view></view>
-    <button class="add-ticket" bindtap="addItem">+ 手动添加商品</button>
-    <view class="expense-subtotal"><text>本次消费小计</text><view><text class="subtotal-value">¥{{billTotal}}</text><text class="subtotal-currency">{{currency}}</text></view></view>
-    <view class="responsibility-summary"><view class="summary-head"><text class="section-title">本笔分担</text><text class="summary-note">保存前实时计算</text></view><view wx:for="{{responsibilityRows}}" wx:key="id" class="responsibility-row"><text>{{item.label}}</text><text>¥{{item.amount}} {{item.currency}}</text></view></view>
-    <view class="expense-settlement">
-      <view class="settlement-row"><view><text class="section-title">本笔结算</text><text class="settlement-copy">一张小票使用一条结算规则</text></view><picker wx:if="{{!settlementCurrencyLocked}}" range="{{settlementCurrencies}}" value="{{settlementCurrencyIndex}}" bindchange="onSettlementCurrency"><view class="settlement-picker">{{settlementCurrency}} ⌄</view></picker><text wx:else class="settlement-locked">{{settlementCurrency}} 已锁定</text></view>
-      <view class="rate-summary"><text wx:if="{{actualPaymentAmount}}">按实际支付 {{actualPaymentAmount}} {{actualPaymentCurrency}} 结算</text><text wx:elif="{{currency === settlementCurrency}}">原币种与结算币种相同</text><text wx:elif="{{referenceRate}}">1 {{currency}} = {{referenceRate}} {{settlementCurrency}} · {{rateEffectiveDate}}</text><text wx:else>未获取汇率</text></view>
-      <text wx:if="{{estimatedSettlementAmount}}" class="estimate-copy">约 ¥{{estimatedSettlementAmount}} {{settlementCurrency}}（参考汇率）</text>
-      <view class="payment-row"><text class="field-label">实际支付金额（可选）</text><input class="payment-input" type="digit" placeholder="例如 140.82" value="{{actualPaymentAmount || ''}}" data-currency="{{settlementCurrency}}" bindinput="onActualPaymentAmount"/><picker range="{{settlementCurrencies}}" value="{{actualPaymentCurrencyIndex}}" bindchange="onActualPaymentCurrency"><view class="payment-currency">{{actualPaymentCurrency || settlementCurrency}} ⌄</view></picker></view>
-      <view wx:if="{{rateStatus === 'failed'}}" class="rate-failed"><text>未获取汇率，请重新查询或手动填写</text><button size="mini" class="rate-retry" bindtap="refreshRate">重新查询</button><input class="manual-rate" type="digit" placeholder="手动填写 1 {{currency}} 等于多少 {{settlementCurrency}}" value="{{referenceRate}}" bindinput="onManualRate"/></view>
-    </view>
-  </view>
-  <view class="adjustment-section">
-    <view class="list-heading" bindtap="toggleAdjustments"><text class="section-title">账单调整</text><text class="summary-note">{{showAdjustments ? "收起" : "可选"}}</text></view><view wx:if="{{showAdjustments}}">
-    <view class="adjustment-row"><view><text class="field-label">税额</text><text class="small-note">商品金额{{taxIncluded ? "已含税" : "未含税"}}</text></view><switch checked="{{taxIncluded}}" bindchange="onTaxIncluded" color="#123E45"/></view>
-    <input class="quiet-input adjustment-input" type="digit" placeholder="填写税额，例如 10" value="{{taxAmount}}" bindinput="onTax"/>
-    <view class="adjustment-row"><text class="field-label">优惠 / 退款</text><picker range="{{adjustmentLabels}}" bindchange="onAdjustmentType"><view class="inline-picker">{{adjustmentLabels[adjustmentType]}}⌄</view></picker></view>
-    <input class="quiet-input adjustment-input" type="digit" placeholder="填写优惠金额，例如 20" value="{{adjustmentAmount < 0 ? -adjustmentAmount : adjustmentAmount}}" bindinput="onDiscount"/>
-  </view></view>
-  </view>
-  <view class="checkout-bar">
-    <view><text class="checkout-label">{{checkoutLabel}}</text><text class="checkout-total">¥{{checkoutAmount}}</text><text class="checkout-currency">{{checkoutCurrency}}</text></view>
-    <button class="checkout-button" bindtap="saveOnly" loading="{{saving}}" disabled="{{saving}}">保存</button>
-  </view>
-  </view>
+  <view class="optional-heading" data-field="showAdjustments" bindtap="toggle"><text>账单调整 <text class="muted">（可选）</text></text><text>{{showAdjustments ? '−' : '+'}}</text></view>
+  <view wx:if="{{showAdjustments}}" class="optional-body"><text class="muted small">选择加收或优惠；原调整规则保留</text><view wx:for="{{adjustments}}" wx:key="id" class="input-row"><view wx:if="{{!reading}}" class="adjustment-sign"><button class="chip {{item.direction === 'add' ? 'active' : ''}}" data-id="{{item.id}}" data-direction="add" bindtap="adjustmentDirection">加收</button><button class="chip {{item.direction !== 'add' ? 'active' : ''}}" data-id="{{item.id}}" data-direction="discount" bindtap="adjustmentDirection">优惠</button></view><input disabled="{{reading}}" type="digit" placeholder="调整金额" value="{{item.amount < 0 ? -item.amount : item.amount}}" data-id="{{item.id}}" bindinput="onAdjustment" /><button wx:if="{{!reading}}" class="text-button danger" data-id="{{item.id}}" bindtap="removeAdjustment">移除</button></view><button wx:if="{{!reading}}" class="secondary" bindtap="addAdjustment">＋ 添加调整</button></view>
+ </view>
+ <view wx:if="{{error}}" class="error">{{error}}</view>
+ <button wx:if="{{reading && canDelete}}" class="delete-button" bindtap="deleteExpense">删除消费</button>
+ <view wx:if="{{!reading}}" class="bottom-bar"><text class="save-note">保存后记入「{{tripName}} · {{occurredAt}}」账单</text><button class="primary" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存</button></view>
 </view>

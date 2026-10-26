@@ -7,7 +7,7 @@ const path = require('node:path')
 function page(api, wx = {}) {
   let definition
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../pages/day-bill/index.js'), 'utf8'), {
-    require(name) { return name.includes('expense-summary') ? require('../services/expense-summary') : name.includes('member-labels') ? require('../services/member-labels') : api },
+    require(name) { if(name.includes('ledger-view')) { const source=fs.readFileSync(path.join(__dirname,'../services/ledger-view.js'),'utf8'); const module={exports:{}}; vm.runInNewContext(source,{module,wx:{showModal(o){o.success({confirm:true})}},Date,Promise}); return module.exports }; return name.includes('expense-summary') ? require('../services/expense-summary') : name.includes('member-labels') ? require('../services/member-labels') : api },
     Page(value) { definition = value }, wx: { showToast() {}, ...wx }, Date, Promise,
   })
   return { ...definition, data: { ...definition.data }, setData(changes) { Object.assign(this.data, changes) } }

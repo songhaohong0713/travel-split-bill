@@ -1,81 +1,73 @@
-const { getLedger, closeDay, previewPayment, markPayment, revokePayment, listExpenses, listTripMembers, deleteExpense } = require('../../services/api')
-const { memberLabelMap } = require('../../services/member-labels')
-const { expenseSummary } = require('../../services/expense-summary')
-
-function confirm(content, title = '确认结清') {
-  return new Promise(resolve => wx.showModal({ title, content, success: result => resolve(result.confirm), fail: () => resolve(false) }))
-}
-
+const api=require('../../services/api')
+const ui=require('../../services/ledger-view')
+const {memberLabelMap}=require('../../services/member-labels')
+const {expenseSummary}=require('../../services/expense-summary')
+function timeLabel(value){if(!value)return '';const d=new Date(value);const day=`${d.getMonth()+1}/${d.getDate()}`;const today=new Date();return `${d.toDateString()===today.toDateString()?'今天':day} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}
 Page({
-  data: { tripId: '', date: '', day: null, name: '', labels: {}, expenses: [], payments: [], busy: false, loading: true, error: '', all: false, statusLabel: '' },
-  onLoad(q) {
-    this.setData({ tripId: q.tripId, date: q.date || '', all: !q.date, name: q.name ? decodeURIComponent(q.name) : '' })
-    return this.reload()
-  },
-  onShow() { if (this.loaded) return this.reload() },
-  reload() {
-    this.setData({loading:true,error:'',day:null,pending:[],groupRows:[],previewGroups:[],scopeDates:[],scopeMessage:'',expenses:[],payments:[]})
-    return Promise.all([getLedger(this.data.tripId), listExpenses(this.data.tripId), listTripMembers(this.data.tripId)]).then(([ledger, records, members]) => {
-      const labels = memberLabelMap(members)
-      const day = ledger.days.find(d => d.date === this.data.date) || null
-      const groupRows = (day && day.groups || []).map(group => ({ currency: group.currency, members: members.map(m => ({ id: m.id, name: labels[m.id], paid: (group.paid_by_participant[m.id] || {}).amount || '0', responsibility: (group.responsibility_by_participant[m.id] || {}).amount || '0' })) }))
-      const pending = (day && day.pending || []).map(p => ({ ...p, text: `${labels[p.from_participant_id] || '同行人'} 需付给 ${labels[p.to_participant_id] || '同行人'} ${p.amount} ${p.currency}` }))
-      const expenses = records.filter(r => this.data.all || r.occurred_at === this.data.date).map(r => {
-        return {...expenseSummary(r,'CNY',labels),date:r.occurred_at,canDelete:r.is_creator || members.some(m=>m.is_current && m.is_owner)}
-      })
-      const payments = ledger.payments.filter(p => this.data.all || p.allocations.some(a => a.date === this.data.date)).map(p => ({ ...p, by: labels[p.created_by] || '同行人', time: new Date(p.created_at).toLocaleString(), direction: p.offset_only ? '跨日抵扣，无需转账' : `${labels[p.from_participant_id] || '同行人'} → ${labels[p.to_participant_id] || '同行人'}`, revokedBy: labels[p.revoked_by] || '同行人', revokedTime: p.revoked_at ? new Date(p.revoked_at).toLocaleString() : '' })).reverse()
-      const closedDates = ledger.days.filter(d=>d.status !== 'recording').map(d=>d.date)
-      this.setData({ day, labels, groupRows, pending, expenses:this.data.all ? expenses.filter(e=>closedDates.includes(e.date)) : expenses, payments, loading: this.data.all && closedDates.length > 0, statusLabel: day ? ({ recording: '记录中', pending: '待转账', settled: '已结清', invalid: '需补全消费' }[day.status]) : '' })
-      this.loaded = true
-      if (this.data.all) {
-        if (!closedDates.length) { this.setData({previewGroups:[],scopeDates:[],scopeMessage:'请先进入当天账单，手动结束当天记账'}); return }
-        return previewPayment(this.data.tripId).then(p=>this.setData({loading:false,previewGroups:p.groups.map(g=>({...g,direction:g.offset_only ? '跨日抵扣，无需转账' : `${labels[g.from_participant_id] || '同行人'} → ${labels[g.to_participant_id] || '同行人'}`})),scopeDates:p.dates,scopeMessage:p.groups.length ? '' : '所选日期已结清'}))
-      }
-    }).catch(e => this.setData({ error: e.message || '读不到账单，请返回重试', loading: false }))
-  },
-  endDay() {
-    if (this.data.busy) return Promise.resolve()
-    this.setData({ busy: true, error: '' })
-    return confirm('结束后将计入旅行待结清金额，仍可补记消费。', '结束当天记账').then(ok => ok ? closeDay(this.data.tripId, this.data.date).then(() => this.reload()) : null)
-      .catch(e => this.setData({ error: e.message || '操作失败' })).finally(() => this.setData({ busy: false }))
-  },
-  async confirmPayment() {
-    if (this.data.busy) return
-    this.setData({ busy: true, error: '' })
-    try {
-      const dates = this.data.all ? null : [this.data.date]
-      let preview = await previewPayment(this.data.tripId, dates)
-      if (!preview.groups.length) { wx.showToast({title:'当前已结清',icon:'none'}); return }
-      // Confirm each currency separately; a previous confirmation invalidates the token.
-      const currencies = preview.groups.map(g => g.currency)
-      for (const currency of currencies) {
-        preview = await previewPayment(this.data.tripId, dates)
-        const group = preview.groups.find(g => g.currency === currency)
-        if (!group) continue
-        const labels = this.data.labels
-        const content = group.offset_only ? '所选日期互相抵扣后无需转账，确认结清这些日期？' : `${labels[group.from_participant_id] || '同行人'} 付给 ${labels[group.to_participant_id] || '同行人'} ${group.amount} ${currency}。请确认已实际转账。`
-        if (!await confirm(content)) break
-        await markPayment(this.data.tripId, {dates:preview.dates, token:preview.token, currency})
-      }
-      await this.reload()
-    } catch (e) {
-      await this.reload()
-      this.setData({error:e.message || '结清失败，请刷新后重试'})
-    } finally { this.setData({busy:false}) }
-  },
-  revoke(e) {
-    if (this.data.busy) return Promise.resolve()
-    this.setData({busy:true,error:''})
-    return confirm('撤销后将恢复对应日期的待结清金额，历史记录仍会保留。', '撤销转账标记')
-      .then(ok => ok ? revokePayment(this.data.tripId,e.currentTarget.dataset.id).then(() => this.reload()) : null)
-      .catch(error => this.setData({error:error.message || '撤销失败'})).finally(() => this.setData({busy:false}))
-  },
-  copyAmount() { const p = this.data.pending[0]; if (p) wx.setClipboardData({data:p.amount}) },
-  deleteRecord(e) {
-    if (this.data.busy) return Promise.resolve()
-    this.setData({busy:true,error:''})
-    return confirm('删除消费后会重算差额，历史转账保留。', '删除消费').then(ok => ok ? deleteExpense(this.data.tripId,e.currentTarget.dataset.id).then(()=>this.reload()) : null)
-      .catch(error=>this.setData({error:error.message || '删除失败'})).finally(()=>this.setData({busy:false}))
-  },
-  openExpense(e) { wx.navigateTo({url:`/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&expenseId=${encodeURIComponent(e.currentTarget.dataset.id)}`}) },
+ data:{expenseCount:0,transferCount:0,hasGroups:false,tripId:'',date:'',all:false,name:'',loading:true,busy:false,error:'',day:null,expenses:[],payments:[],pending:[],groupRows:[],previewGroups:[],scopeDates:[],scopeMessage:'',transfers:[],carry:[]},
+ onLoad(q){this.setData({tripId:q.tripId,date:q.date || '',all:!q.date,name:decodeURIComponent(q.name || '')});return this.reload()},
+ onShow(){if(this.loaded)return this.reload()},
+ async reload(){
+  this.setData({loading:true,error:'',previewGroups:[],scopeDates:[],transfers:[],pending:[],scopeMessage:''})
+  try{
+   const [ledger,records,members]=await Promise.all([api.getLedger(this.data.tripId),api.listExpenses(this.data.tripId),api.listTripMembers(this.data.tripId)])
+   const labels=memberLabelMap(members)
+   const day=ledger.days.find(d=>d.date===this.data.date) || null
+   const closed=ledger.days.filter(d=>d.status!=='recording')
+   const filtered=records.filter(r=>this.data.all?closed.some(d=>d.date===r.occurred_at):r.occurred_at===this.data.date)
+   const expenses=filtered.map(r=>({...expenseSummary(r,'CNY',labels),date:r.occurred_at}))
+   const pending=(day && day.pending || []).map(p=>({...p,text:`${labels[p.from_participant_id] || '同行人'} 付给 ${labels[p.to_participant_id] || '同行人'}`}))
+   const groups=day && day.groups || []
+   const groupRows=groups.map(g=>({currency:g.currency,members:members.map(m=>({id:m.id,name:labels[m.id],paid:(g.paid_by_participant[m.id] || {}).amount || '0.00',responsibility:(g.responsibility_by_participant[m.id] || {}).amount || '0.00'}))}))
+   const payments=ledger.payments.filter(p=>this.data.all || p.allocations.some(a=>a.date===this.data.date)).map(p=>({...p,by:labels[p.created_by] || '同行人',time:timeLabel(p.created_at),direction:`${labels[p.from_participant_id] || '同行人'} → ${labels[p.to_participant_id] || '同行人'}`})).reverse()
+   const active=payments.filter(p=>!p.revoked_at)
+   const transferView=p=>({...p,symbol:ui.symbol(p.currency),from:labels[p.from_participant_id] || '同行人',to:labels[p.to_participant_id] || '同行人'})
+   const transfers=(day && day.status==='settled'?active.map(p=>({...ui.dayPayment(p,this.data.date,ledger.members || members.map(m=>m.id)),settled:true})):pending).map(transferView)
+   this.setData({day,labels,expenses,expenseCount:expenses.length,payments,hasActivePayments:active.length>0,groupRows,hasGroups:groupRows.length>0,pending,transfers,transferCount:transfers.length,hasCarry:!!(day && day.carry_entries && day.carry_entries.length),carry:day && day.carry_entries || [],title:this.data.all?'合并结清':this.data.date?ui.dateTitle(this.data.date):'当天账单',original:ui.originalTotals(filtered),statusLabel:day?{recording:'记录中',pending:'待转账',settled:'已结清',invalid:'需补全'}[day.status]:'',loading:false,historyPending:ledger.history_status==='pending'})
+   this.loaded=true
+   if(this.data.all){
+    if(!closed.length){this.setData({scopeMessage:'还没有待结清日期'});return}
+    const p=await api.previewPayment(this.data.tripId)
+    this.setData({previewGroups:p.groups,scopeDates:p.dates,transferCount:p.groups.length,transfers:p.groups.map(transferView),scopeMessage:p.groups.length?'':'所选日期已结清'})
+   }
+  }catch(e){this.setData({loading:false,error:e.message || '账单暂时无法加载，请重试',transfers:[],previewGroups:[],scopeDates:[]})}
+ },
+ async endDay(){
+  if(this.data.busy)return
+  if(!await ui.confirm('结束后计入旅行待结清，仍可补记消费。','结束当天记账'))return
+  this.setData({busy:true,error:''})
+  try{await api.closeDay(this.data.tripId,this.data.date);await this.reload()}
+  catch(e){this.setData({error:e.message || '操作失败'})}finally{this.setData({busy:false})}
+ },
+ async confirmPayment(){
+  if(this.data.busy)return
+  this.setData({busy:true,error:''})
+  try{
+   const dates=this.data.all?null:[this.data.date]
+   let p=await api.previewPayment(this.data.tripId,dates)
+   if(!p.groups.length){wx.showToast({title:'当前无需转账',icon:'none'});return}
+   for(const currency of p.groups.map(g=>g.currency)){
+    p=await api.previewPayment(this.data.tripId,dates)
+    const g=p.groups.find(g=>g.currency===currency);if(!g)continue
+    const content=g.offset_only?'所选日期互相抵扣，无需实际转账。确认结清？':`${this.data.labels[g.from_participant_id] || '同行人'} 付给 ${this.data.labels[g.to_participant_id] || '同行人'} ${g.amount} ${g.currency}。请核对已实际转账后再标记。`
+    if(!await ui.confirm(content,'标记为已转账'))break
+    await api.markPayment(this.data.tripId,{dates:p.dates,token:p.token,currency})
+   }
+   await this.reload()
+  }catch(e){await this.reload();this.setData({error:e.message || '结清失败，请刷新后重试'})}
+  finally{this.setData({busy:false})}
+ },
+ async revoke(e){
+  if(this.data.busy)return
+  const id=e && e.currentTarget.dataset.id
+  const records=id?this.data.payments.filter(p=>p.id===id):this.data.payments.filter(p=>!p.revoked_at)
+  if(!records.length)return
+  if(!await ui.confirm('撤销后恢复待结清金额；历史转账记录仍会保留。','撤销已转账'))return
+  this.setData({busy:true,error:''})
+  try{for(const p of records)await api.revokePayment(this.data.tripId,p.id);await this.reload()}
+  catch(err){await this.reload();this.setData({error:err.message || '撤销失败'})}finally{this.setData({busy:false})}
+ },
+ copyAmount(e){const p=this.data.transfers[Number(e.currentTarget.dataset.index || 0)];if(p)wx.setClipboardData({data:p.amount})},
+ openWechat(){wx.showModal({title:'前往微信转账',content:'金额可先复制。请点击右上角关闭小程序，返回微信聊天完成转账，再回来标记。',showCancel:false})},
+ openExpense(e){wx.navigateTo({url:`/pages/expense/index?tripId=${encodeURIComponent(this.data.tripId)}&expenseId=${encodeURIComponent(e.currentTarget.dataset.id)}`})},
 })

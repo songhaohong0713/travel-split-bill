@@ -2,10 +2,25 @@
 
 import hashlib
 import json
+from contextvars import ContextVar
+from copy import deepcopy
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.api.v1.settlements import ExpenseInput, _grouped_payload
 from app.core.money import quantized_money
+
+client_timezone_offset: ContextVar[int] = ContextVar(
+    "ledger_timezone_offset", default=0
+)
+
+
+def business_today(now=None):
+    return (
+        ((now or datetime.now(UTC)) - timedelta(minutes=client_timezone_offset.get()))
+        .date()
+        .isoformat()
+    )
 
 
 def snapshot_token(snapshot):
@@ -20,7 +35,7 @@ def amount(currency, value):
     return quantized_money(currency, value).amount
 
 
-def project(snapshot):
+def _raw_project(snapshot):
     members = sorted(snapshot["members"])
     state = snapshot["state"]
     dates = set(state["closed_dates"]) | {
@@ -119,8 +134,6 @@ def project(snapshot):
 
 
 def payment_preview(snapshot, requested_dates=None):
-    if snapshot["state"].get("history_confirmation", {}).get("status") == "pending":
-        raise ValueError("请先确认历史结算情况")
     ledger = project(snapshot)
     selected = (
         sorted(set(requested_dates))
@@ -167,3 +180,189 @@ def payment_preview(snapshot, requested_dates=None):
             }
         )
     return {"dates": selected, "groups": groups, "token": snapshot_token(snapshot)}
+
+
+def _raw_days(snapshot, records=None):
+    return {
+        d["date"]: d
+        for d in _raw_project(
+            {
+                **snapshot,
+                "expenses": snapshot["expenses"] if records is None else records,
+                "state": {"closed_dates": [], "payments": []},
+            }
+        )["days"]
+    }
+
+
+def _balances(day):
+    return {
+        g["currency"]: Decimal(
+            g["net_by_participant"][min(g["net_by_participant"])]["amount"]
+        )
+        for g in day["groups"]
+    }
+
+
+def project(snapshot):
+    raw = _raw_days(snapshot)
+    active = [p for p in snapshot["state"]["payments"] if not p.get("revoked_at")]
+    frozen = {}
+    known_currencies = {}
+    active_ids = {p["id"] for p in active}
+    for payment in active:
+        if not set(payment.get("depends_on", [])).issubset(active_ids):
+            continue
+        evidence = _raw_days(snapshot, payment.get("basis_expenses", []))
+        evidence_dates = {a["date"] for a in payment["allocations"]} | {
+            b["date"] for b in payment.get("freeze_basis", [])
+        }
+        for day in evidence_dates:
+            known_currencies[day] = set(_balances(evidence.get(day, {"groups": []})))
+        if "freeze_basis" in payment:
+            for basis in payment["freeze_basis"]:
+                frozen[basis["date"], basis["currency"]] = Decimal(basis["amount"])
+        else:
+            basis = _raw_days(snapshot, payment.get("basis_expenses", []))
+            for allocation in payment["allocations"]:
+                key = allocation["date"], payment["currency"]
+                original = _balances(basis.get(key[0], {"groups": []})).get(key[1])
+                if original is not None and original == Decimal(allocation["amount"]):
+                    frozen[key] = original
+    for day, currencies in known_currencies.items():
+        if currencies and all((day, c) in frozen for c in currencies):
+            for currency in _balances(raw.get(day, {"groups": []})):
+                frozen.setdefault((day, currency), Decimal(0))
+    dates = set(raw) | set(snapshot["state"]["closed_dates"])
+    dates |= {
+        a["date"] for p in snapshot["state"]["payments"] for a in p["allocations"]
+    }
+    balances = {d: _balances(raw.get(d, {"groups": []})) for d in dates}
+    carries = {d: [] for d in dates}
+    for payment in active:
+        for allocation in payment["allocations"]:
+            day, currency = allocation["date"], payment["currency"]
+            if (day, currency) not in frozen:
+                balances[day][currency] = balances[day].get(
+                    currency, Decimal(0)
+                ) - Decimal(allocation["amount"])
+    today = business_today()
+    for day, currency in frozen:
+        balances.setdefault(day, {})[currency] = Decimal(0)
+    for (day, currency), original in sorted(frozen.items()):
+        current = _balances(raw.get(day, {"groups": []})).get(currency, Decimal(0))
+        delta = current - original
+        if not delta:
+            continue
+        target = next(
+            (d for d in sorted(dates) if d > day and (d, currency) not in frozen),
+            max(today, (date.fromisoformat(day) + timedelta(days=1)).isoformat()),
+        )
+        while (target, currency) in frozen:
+            target = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
+        dates.add(target)
+        balances.setdefault(target, {})[currency] = (
+            balances.get(target, {}).get(currency, Decimal(0)) + delta
+        )
+        carries.setdefault(target, []).append(
+            {
+                "kind": "adjustment",
+                "source_date": day,
+                "currency": currency,
+                "signed_amount": amount(currency, delta),
+                "amount": amount(currency, abs(delta)),
+            }
+        )
+    days = []
+    members = sorted(snapshot["members"])
+    for day in sorted(dates, reverse=True):
+        row = deepcopy(
+            raw.get(
+                day,
+                {"date": day, "error": "", "count": 0, "expense_ids": [], "groups": []},
+            )
+        )
+        row["original_totals"] = [
+            {
+                "currency": g["currency"],
+                "amount": amount(
+                    g["currency"],
+                    sum(
+                        (
+                            Decimal(v["amount"])
+                            for v in g["paid_by_participant"].values()
+                        ),
+                        Decimal(0),
+                    ),
+                ),
+                "signed_amount": amount(g["currency"], _balances(row)[g["currency"]]),
+            }
+            for g in row["groups"]
+        ]
+        row["carry_entries"] = carries.get(day, [])
+        row["pending"] = []
+        for currency, value in sorted(balances[day].items()):
+            if value and len(members) == 2:
+                row["pending"].append(
+                    {
+                        "currency": currency,
+                        "amount": amount(currency, abs(value)),
+                        "signed_amount": amount(currency, value),
+                        "from_participant_id": members[1] if value > 0 else members[0],
+                        "to_participant_id": members[0] if value > 0 else members[1],
+                    }
+                )
+            elif value:
+                row["error"] = "请等待同行人加入后结清"
+        recording = (
+            day >= today
+            and day not in snapshot["state"]["closed_dates"]
+            and not any(d == day for d, _ in frozen)
+            and not any(a["date"] == day for p in active for a in p["allocations"])
+        )
+        row["status"] = (
+            "invalid"
+            if row["error"]
+            else "recording"
+            if recording
+            else "pending"
+            if row["pending"]
+            else "settled"
+        )
+        row["settled_transfers"] = [
+            p for p in active if any(a["date"] == day for a in p["allocations"])
+        ]
+        days.append(row)
+    return {
+        "days": days,
+        "payments": snapshot["state"]["payments"],
+        "revision": snapshot["revision"],
+        "members": members,
+        "history_status": snapshot["state"]
+        .get("history_confirmation", {})
+        .get("status", "not_required"),
+    }
+
+
+def settlement_basis(snapshot, preview, currency):
+    ledger = project(snapshot)
+    selected = set(preview["dates"])
+    sources = selected | {
+        c["source_date"]
+        for d in ledger["days"]
+        if d["date"] in selected
+        for c in d["carry_entries"]
+        if c["currency"] == currency
+    }
+    raw = _raw_days(snapshot)
+    return [
+        {
+            "date": d,
+            "currency": currency,
+            "amount": amount(
+                currency,
+                _balances(raw.get(d, {"groups": []})).get(currency, Decimal(0)),
+            ),
+        }
+        for d in sorted(sources)
+    ]

@@ -16,6 +16,7 @@ from app.api.v1.shares import router as shares_router
 from app.api.v1.trip_invites import router as trip_invites_router
 from app.api.v1.trips import router as trips_router
 from app.api.v1.uploads import router as uploads_router
+from app.core.ledger import client_timezone_offset
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
     CloudBasePgConfigurationError,
@@ -45,6 +46,19 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 logger = logging.getLogger(__name__)
+
+
+@app.middleware("http")
+async def ledger_calendar_timezone(request, call_next):
+    try:
+        offset = int(request.headers.get("X-Client-Timezone-Offset", "0"))
+    except ValueError:
+        offset = 0
+    token = client_timezone_offset.set(offset if -840 <= offset <= 720 else 0)
+    try:
+        return await call_next(request)
+    finally:
+        client_timezone_offset.reset(token)
 
 
 @app.middleware("http")

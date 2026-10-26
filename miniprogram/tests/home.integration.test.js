@@ -1,99 +1,30 @@
-const assert = require("node:assert/strict")
-const fs = require("node:fs")
-const path = require("node:path")
-const test = require("node:test")
-const vm = require("node:vm")
-
-function loadApi(calls, payload) {
-  const source = fs.readFileSync(path.join(__dirname, "..", "services", "api.js"), "utf8")
-  const module = { exports: {} }
-  vm.runInNewContext(source, {
-    getApp() { return { globalData: { apiBaseUrl: "https://example.test" } } },
-    wx: {
-      getStorageSync() { return "" },
-      request(options) {
-        calls.push(options)
-        options.success({ statusCode: 200, data: { data: payload } })
-      },
-    },
-    module,
-    exports: module.exports,
-    Promise,
-  })
-  return module.exports
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path')
+function page(name,api,wx={}){
+ let definition
+ const uiModule={exports:{}}
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../services/ledger-view.js'),'utf8'),{module:uiModule,wx:{showModal(o){o.success({confirm:true})},...wx},Date,Promise,getApp(){return {globalData:{}}}})
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,`../pages/${name}/index.js`),'utf8'),{Page(d){definition=d},require(n){if(n.includes('ledger-view'))return uiModule.exports;if(n.includes('member-labels'))return require('../services/member-labels');return api},wx:{showToast(){},...wx},Date,Promise})
+ return {...definition,data:JSON.parse(JSON.stringify(definition.data)),setData(c){Object.assign(this.data,c)}}
 }
-
-test("listTrips requests the current user's trips", async () => {
-  const calls = []
-  const api = loadApi(calls, [{ id: "trip-1", name: "东京周末", default_currency: "JPY" }])
-
-  const trips = await api.listTrips()
-
-  assert.equal(calls[0].url, "https://example.test/v1/trips")
-  assert.equal(calls[0].method, "GET")
-  assert.equal(trips[0].name, "东京周末")
+test('home authenticated list opens detail, not expense; refresh removes deleted trips',async()=>{
+ let trips=[{id:'t',name:'东京',default_currency:'CNY',member_count:2}],nav=[]
+ const p=page('trips',{login:async()=>{},listTrips:async()=>trips,ledgerSummary:async()=>({trips:[],groups:[]})},{navigateTo(o){nav.push(o.url)}})
+ await p.onLoad();p.openTrip({currentTarget:{dataset:{id:'t'}}});assert.match(nav[0],/pages\/trip-detail/);assert.equal(p.data.authFailed,false)
+ trips=[];await p.onShow();assert.equal(p.data.trips.length,0)
 })
-
-function loadHomePage(api, wx = {}) {
-  const source = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.js"), "utf8")
-  let definition
-  vm.runInNewContext(source, {
-    Page(value) { definition = value },
-    require() { return api },
-    wx: { showToast() {}, ...wx },
-    Promise,
-    encodeURIComponent,
-  })
-  return { definition }
-}
-
-function pageInstance(definition, data = {}) {
-  return { ...definition, data: { ...definition.data, ...data }, setData(value) { this.data = { ...this.data, ...value } } }
-}
-
-test("home loads trips after login and opens a selected trip", async () => {
-  const calls = []
-  const { definition } = loadHomePage({
-    login: () => Promise.resolve(),
-    listTrips: () => Promise.resolve([{ id: "trip-1", name: "东京周末", default_currency: "JPY" }]),
-    createTrip() {},
-  }, { navigateTo(value) { calls.push(value) } })
-  const page = pageInstance(definition)
-
-  await page.onLoad()
-
-  assert.equal(page.data.trips[0].name, "东京周末")
-  page.openTrip({ currentTarget: { dataset: { id: "trip-1", name: "%E4%B8%9C%E4%BA%AC%E5%91%A8%E6%9C%AB", currency: "JPY" } } })
-  assert.match(calls[0].url, /tripId=trip-1/)
-  assert.match(calls[0].url, /currency=JPY/)
-  assert.match(calls[0].url, /name=%E4%B8%9C%E4%BA%AC%E5%91%A8%E6%9C%AB/)
-  assert.doesNotMatch(calls[0].url, /%25E4/)
+test('only login failure shows login notice, successful retry clears it',async()=>{
+ let fail=true
+ const p=page('trips',{login:async()=>{if(fail)throw Error()},listTrips:async()=>[],ledgerSummary:async()=>({trips:[],groups:[]})})
+ await p.onLoad();assert.equal(p.data.authFailed,true);fail=false;await p.retryLogin();assert.equal(p.data.authFailed,false)
 })
-
-test("home refreshes the trip list when returning from a deleted trip", async () => {
-  let trips = [{ id: "trip-1", name: "东京周末", default_currency: "JPY" }]
-  const { definition } = loadHomePage({
-    login: () => Promise.resolve(),
-    listTrips: () => Promise.resolve(trips),
-    createTrip() {},
-  })
-  const page = pageInstance(definition)
-
-  await page.onLoad()
-  trips = []
-  await page.onShow()
-
-  assert.deepEqual(JSON.parse(JSON.stringify(page.data.trips)), [])
+test('create prompts for duplicate and never creates after cancel',async()=>{
+ let calls=0
+ const p=page('trip-create',{ensureAuthenticated:async()=>{},listTrips:async()=>[{name:'东京'}],createTrip:async()=>{calls++}},{showModal(o){o.success({confirm:false})}})
+ p.setData({name:'东京'});await p.createTrip();assert.equal(calls,0);assert.equal(p.data.creating,false)
 })
-
-test("home exposes travel-stub layout hooks", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.wxml"), "utf8")
-  assert.match(wxml, /class="travel-stub"/)
-  assert.match(wxml, /class="empty-trips"/)
-  assert.match(wxml, /class="create-panel"/)
+test('creation redirects to detail invitation guide even when optional dates fail',async()=>{
+ let url='';let calls=0
+ const p=page('trip-create',{ensureAuthenticated:async()=>{},listTrips:async()=>[],createTrip:async()=>{calls++;return{id:'t',default_currency:'CNY'}},updateTripDates:async()=>{throw Error()}},{redirectTo(o){url=o.url}})
+ p.setData({name:'东京',startDate:'2026-10-26'});await p.createTrip();assert.equal(calls,1);assert.match(url,/trip-detail/);assert.match(url,/inviteGuide=1/);assert.match(url,/dateFailed=1/)
 })
-
-test("home shows a compact member count on each travel stub", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "..", "pages", "trips", "index.wxml"), "utf8")
-  assert.match(wxml, /成员 {{item.member_count \|\| 1}}\/2/)
-})
+module.exports={page}

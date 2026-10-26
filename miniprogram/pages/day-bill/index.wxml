@@ -1,28 +1,16 @@
-<view class="ledger-page">
-  <view class="ledger-heading"><text class="ledger-title">{{all ? '整段旅行结清' : date}}</text><text class="ledger-muted">{{all ? '当前旅行 · 不含记录中的日期' : name}}</text><text wx:if="{{statusLabel}}" class="ledger-badge">{{statusLabel}}</text></view>
-  <text wx:if="{{loading}}">正在整理账单…</text>
-  <view wx:if="{{error}}" class="ledger-error">{{error}}</view>
-  <view wx:if="{{day.error}}" class="ledger-error">{{day.error}}</view>
-  <view wx:if="{{all}}" class="ledger-card"><text class="ledger-section">结清预览</text><text class="ledger-muted">{{scopeMessage}}</text><view wx:for="{{previewGroups}}" wx:key="currency" class="ledger-transfer"><text>{{item.direction}}</text><text> {{item.amount}} {{item.currency}}</text></view><text class="ledger-muted">涵盖日期</text><text wx:for="{{scopeDates}}" wx:key="*this" class="ledger-muted">{{item}}</text></view>
-  <view wx:if="{{!all}}" class="ledger-card">
-    <text class="ledger-section">剩余待转账</text>
-    <view wx:for="{{pending}}" wx:key="currency" class="ledger-transfer"><text>{{item.text}}</text></view>
-    <text wx:if="{{!pending.length}}" class="ledger-muted">{{day.status === 'recording' ? '结束当天记账后可结清' : day.error ? '补全消费后可计算' : '当前无需转账'}}</text>
-    <button wx:if="{{pending.length === 1}}" class="ledger-secondary" bindtap="copyAmount">复制金额</button>
+<view class="screen">
+ <view class="heading"><view class="row"><text class="title">{{title}}</text><text wx:if="{{day}}" class="badge {{day.status}}">{{statusLabel}}</text></view><text class="muted block">{{name}} · {{expenseCount}} 笔{{original ? ' · ' + original : ''}}</text></view>
+ <text wx:if="{{loading}}" class="muted block">正在加载…</text><view wx:if="{{error}}"><text class="error">{{error}}</text><button class="secondary" bindtap="reload">重试</button></view>
+ <block wx:if="{{!loading && !error}}">
+  <view class="card"><view class="row"><text class="section-title">转账</text><text class="muted">共 {{transferCount}} 笔</text></view>
+   <view wx:for="{{transfers}}" wx:key="currency" class="transfer-block"><view class="transfer-row {{item.settled ? 'paid' : ''}}"><view class="people"><text class="avatar">{{item.from}}</text><text class="muted">→</text><text class="avatar dark">{{item.to}}</text></view><view class="transfer-amount"><text class="block">{{item.symbol}}{{item.amount}}</text><text class="muted block">{{item.currency}}</text></view></view><text class="muted block transfer-direction">{{item.from}} 付给 {{item.to}}<text wx:if="{{item.combined}}"> · 合并转账的本日分配</text></text><text wx:if="{{item.settled}}" class="marked block">✓ {{item.by}} · {{item.time}} 标记已转账</text><view wx:else class="row"><button class="secondary small-button" data-index="{{index}}" bindtap="copyAmount">复制金额</button><button class="secondary small-button" bindtap="openWechat">打开微信</button></view></view>
+   <text wx:if="{{!transferCount}}" class="muted block no-transfer">{{day.status === 'recording' ? '当天仍在记录中，结束记账后可标记转账' : '当前无需转账'}}</text>
+   <text wx:if="{{transferCount && day.status !== 'settled'}}" class="muted block footnote">任何一方都可以标记，标记后可随时撤销</text>
+   <text wx:if="{{scopeMessage}}" class="muted block">{{scopeMessage}}</text>
   </view>
-  <view wx:for="{{groupRows}}" wx:key="currency" class="ledger-card">
-    <text class="ledger-section">分摊明细 · {{item.currency}}</text>
-    <view class="ledger-table ledger-muted"><text>成员</text><text>实际支付</text><text>应承担</text></view>
-    <view wx:for="{{item.members}}" wx:for-item="person" wx:key="id" class="ledger-table"><text>{{person.name}}</text><text>{{person.paid}}</text><text>{{person.responsibility}}</text></view>
-  </view>
-  <view class="ledger-card"><text class="ledger-section">{{all ? '旅行消费' : '当天消费'}} · {{expenses.length}} 笔</text>
-    <view wx:for="{{expenses}}" wx:key="id" class="ledger-expense" data-id="{{item.id}}" bindtap="openExpense"><view class="ledger-table"><text>{{item.title}}</text><text>{{item.total}} {{item.currency}} ›</text></view><text class="ledger-muted">{{item.date}} · {{item.itemCount}} 项 · {{item.payer}}付 · {{item.amountLabel}}</text><text wx:if="{{item.originalTotal}}" class="ledger-muted">原币合计 {{item.originalTotal}} {{item.originalCurrency}}</text><text wx:if="{{item.canDelete}}" class="danger" data-id="{{item.id}}" catchtap="deleteRecord">删除</text></view>
-  </view>
-  <view wx:if="{{payments.length}}" class="ledger-card"><text class="ledger-section">结清记录</text>
-    <view wx:for="{{payments}}" wx:key="id" class="ledger-history"><text>{{item.direction}} · {{item.amount}} {{item.currency}}</text><text class="ledger-muted">{{item.by}} · {{item.time}} 标记</text><text wx:if="{{item.revoked_at}}" class="ledger-muted">{{item.revokedBy}} · {{item.revokedTime}} 已撤销</text><button wx:else class="ledger-secondary danger" size="mini" data-id="{{item.id}}" bindtap="revoke" disabled="{{busy}}">撤销已转账</button></view>
-  </view>
-  <view class="ledger-bottom">
-    <button wx:if="{{day.status === 'recording'}}" class="ledger-primary" bindtap="endDay" loading="{{busy}}" disabled="{{busy || loading}}">结束当天记账</button>
-    <button wx:elif="{{all || day.status === 'pending'}}" class="ledger-primary" bindtap="confirmPayment" loading="{{busy}}" disabled="{{busy || loading}}">{{all ? '预览并结清当前旅行' : '标记为已转账'}}</button>
-  </view>
+  <view wx:if="{{hasCarry}}" class="card"><text class="section-title block">补差额</text><view wx:for="{{carry}}" wx:key="source_date" class="row carry-row"><text class="muted">{{item.source_date}} 结清后补记</text><text>{{item.amount}} {{item.currency}}</text></view></view>
+  <view wx:if="{{hasGroups}}" class="card"><text class="section-title block">分摊明细</text><view wx:for="{{groupRows}}" wx:key="currency"><view class="table-head table-row muted"><text>成员</text><text>实际支付</text><text>应承担 {{item.currency}}</text></view><view wx:for="{{item.members}}" wx:for-item="member" wx:key="id" class="table-row"><text>{{member.name}}</text><text>{{member.paid}}</text><text class="responsibility">{{member.responsibility}}</text></view></view></view>
+  <view class="card"><view class="row"><text class="section-title">{{all ? '所选日期消费' : '当天消费'}}</text><text class="muted">共 {{expenseCount}} 笔</text></view><view wx:for="{{expenses}}" wx:key="id" class="expense-row row" data-id="{{item.id}}" bindtap="openExpense"><view><text class="expense-name block">{{item.title}}</text><text class="muted block">{{item.itemCount}} 项 · {{item.payer}}付</text></view><view class="expense-money"><text class="block">{{item.total}}　›</text><text class="muted block">{{item.currency}}</text></view></view><text wx:if="{{!expenseCount}}" class="muted block no-transfer">没有消费记录</text></view>
+ </block>
+ <view wx:if="{{!loading && !error}}" class="bottom-bar"><button wx:if="{{day.status === 'recording'}}" class="primary" loading="{{busy}}" disabled="{{busy}}" bindtap="endDay">结束当天记账</button><button wx:elif="{{day.status === 'settled' && hasActivePayments}}" class="secondary danger" loading="{{busy}}" disabled="{{busy}}" bindtap="revoke">撤销已转账</button><button wx:elif="{{transferCount}}" class="primary" loading="{{busy}}" disabled="{{busy}}" bindtap="confirmPayment">标记为已转账</button></view>
 </view>
