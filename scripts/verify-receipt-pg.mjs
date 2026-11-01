@@ -12,6 +12,8 @@ const compatibility='cloudbase/migrations/20261031010100_receipt_job_stored.sql'
 if(fs.existsSync(compatibility))await db.exec(fs.readFileSync(compatibility,'utf8'))
 const png='cloudbase/migrations/20261101010000_receipt_png.sql'
 if(fs.existsSync(png)){await db.exec(fs.readFileSync(png,'utf8'));assert.deepEqual((await db.query("SELECT allowed_mime_types FROM storage.buckets WHERE id='receipts'")).rows[0].allowed_mime_types,['image/jpeg','image/png'])}
+await db.exec(fs.readFileSync('cloudbase/migrations/20261101020000_trip_nickname.sql','utf8'))
+assert.equal((await db.query("SELECT count(*)::int n FROM information_schema.columns WHERE (table_name='trip_members' AND column_name='nickname') OR (table_name='receipt_cleanup' AND column_name='attempts')")).rows[0].n,2)
 await db.exec(`SET request.jwt.claims='{"role":"service_role"}';`)
 await db.query("SELECT tsb_create_trip('trip-a','a','Tokyo','CNY')")
 await db.query("SELECT tsb_create_trip('trip-b','a','Other','CNY')")
@@ -32,5 +34,37 @@ assert.equal((await db.query('SELECT count(*)::int AS n FROM receipt_images')).r
 await db.exec("CREATE POLICY broad_read ON storage.objects FOR SELECT USING(true); INSERT INTO storage.objects VALUES ('receipts','private.jpg'),('other','public.jpg'); SET ROLE authenticated;")
 assert.deepEqual((await db.query('SELECT bucket_id FROM storage.objects')).rows,[{bucket_id:'other'}])
 await assert.rejects(()=>db.query('SELECT * FROM public.receipt_cleanup'),/permission denied/)
+
+await db.exec('RESET ROLE;')
+await db.exec(`SET request.jwt.claims='{"role":"service_role"}';`)
+for(const file of ['20261024010000_daily_settlement.sql','20261024010100_backend_hardening.sql','20261024010200_business_backup.sql','20261027030000_offline_trip.sql','20261101030000_calendar_orphans.sql'])await db.exec(fs.readFileSync('cloudbase/migrations/'+file,'utf8'))
+await db.query("SELECT tsb_create_trip_with_timezone('tz','a','Tokyo fixed','CNY',-540)")
+assert.equal((await db.query("SELECT tsb_ledger_snapshot('tz','a') AS v")).rows[0].v.timezone_offset_minutes,-540)
+assert.equal((await db.query("SELECT tsb_set_trip_timezone('trip-a','foreign',0) AS v")).rows[0].v.not_found,true)
+assert.equal((await db.query("SELECT tsb_set_trip_timezone('trip-a','a',-480) AS v")).rows[0].v.ok,true)
+assert.equal((await db.query("SELECT tsb_set_trip_timezone('trip-a','a',0) AS v")).rows[0].v.conflict,true)
+const addImage=async id=>{
+ await db.query("SELECT tsb_create_receipt_image($1,'a','trip-a',$2)",[id,'a/trip-a/'+id+'.jpg'])
+ await db.query("UPDATE receipt_images SET status='stored',created_at=now()-interval '40 days' WHERE id=$1",[id])
+}
+for(const id of ['orphan','retained','active','recent','race'])await addImage(id)
+for(const id of ['retained','active','race']){
+ await db.query("SELECT tsb_create_receipt_job($1,$2,'a')",['job-'+id,id])
+ await db.query("UPDATE receipt_jobs SET status=$1 WHERE image_id=$2",[id==='active'?'processing':'completed',id])
+}
+await save('keep','trip-a','job-retained')
+await db.query("UPDATE receipt_images SET created_at=now() WHERE id='recent'")
+const cutoff=(await db.query("SELECT now()-interval '30 days' AS cutoff")).rows[0].cutoff
+const candidates=(await db.query('SELECT tsb_receipt_orphan_preview($1) AS v',[cutoff])).rows[0].v
+assert.deepEqual(candidates.map(r=>r.id).sort(),['orphan','race'])
+await save('race-saved','trip-a','job-race')
+assert.equal((await db.query("SELECT tsb_queue_receipt_orphan('race',$1) AS v",[cutoff])).rows[0].v.queued,false)
+assert.equal((await db.query("SELECT tsb_queue_receipt_orphan('orphan',$1) AS v",[cutoff])).rows[0].v.queued,true)
+assert.equal((await db.query("SELECT tsb_queue_receipt_orphan('orphan',$1) AS v",[cutoff])).rows[0].v.queued,false)
+assert.equal((await db.query("SELECT count(*)::int n FROM receipt_images WHERE id IN ('retained','active','recent','race')")).rows[0].n,4)
+await assert.rejects(()=>db.query('SELECT tsb_receipt_orphan_preview(now())'),/TSB_RETENTION_REQUIRED/)
+await db.exec(`SET ROLE authenticated; SET request.jwt.claims='{"role":"authenticated"}';`)
+await assert.rejects(()=>db.query('SELECT tsb_receipt_orphan_preview(now())'),/permission denied/)
+await assert.rejects(()=>db.query("SELECT tsb_set_trip_timezone('trip-a','a',0)"),/permission denied/)
 await db.close()
-console.log('PG receipt RPC, cross-trip guard, shared reference cleanup, durable outbox and private RLS passed.')
+console.log('PG receipt RPC, private RLS, fixed calendars, 30-day orphan preview and save-before-cleanup race passed.')

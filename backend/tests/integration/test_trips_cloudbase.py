@@ -72,7 +72,7 @@ def test_trips_use_cloudbase_rpc_for_mutation_and_table_api_for_reading(
     listed = test_client.get("/v1/trips", headers=_headers())
 
     assert created.status_code == 201
-    assert provider.rpc_calls[0][0] == "tsb_create_trip"
+    assert provider.rpc_calls[0][0] == "tsb_create_trip_with_timezone"
     assert listed.status_code == 200
     assert provider.rpc_calls[1] == ("tsb_list_member_trips", {"p_user_id": "owner-1"})
 

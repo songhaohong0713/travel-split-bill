@@ -56,8 +56,8 @@ function dayPayment(payment,date,members) {
   if(!date)return payment
   const allocation=(payment.allocations || []).find(a=>a.date===date)
   if(!allocation)return payment
-  const signed=Number(allocation.amount), ids=members.slice().sort()
-  return {...payment,amount:Math.abs(signed).toFixed(['JPY','KRW'].includes(payment.currency)?0:2),from_participant_id:signed>=0?ids[1]:ids[0],to_participant_id:signed>=0?ids[0]:ids[1],combined:(payment.allocations || []).length>1}
+  const signed=money().units(allocation.amount,payment.currency), ids=members.slice().sort()
+  return {...payment,amount:money().fromUnits(signed<0n?-signed:signed,payment.currency),from_participant_id:signed>=0?ids[1]:ids[0],to_participant_id:signed>=0?ids[0]:ids[1],combined:(payment.allocations || []).length>1}
 }
 async function createTrip(){
     const api=require('./api')

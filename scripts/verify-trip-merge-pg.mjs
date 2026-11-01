@@ -16,7 +16,7 @@ const command=(...args)=>{
 }
 try {
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;')
-  for(const file of ['initial_postgresql_schema.sql','20260919_trip_collaboration.sql','20261021_daily_settlement.sql','20261022_backend_hardening.sql','20261022_business_backup.sql']) await db.exec(fs.readFileSync('infra/cloudbase/'+file,'utf8'))
+  for(const file of ['infra/cloudbase/initial_postgresql_schema.sql','infra/cloudbase/20260919_trip_collaboration.sql','cloudbase/migrations/20261024010000_daily_settlement.sql','cloudbase/migrations/20261024010100_backend_hardening.sql','cloudbase/migrations/20261024010200_business_backup.sql']) await db.exec(fs.readFileSync(file,'utf8'))
   await db.exec(`SET request.jwt.claims='{"role":"service_role"}';
     INSERT INTO users(id) VALUES('a'),('b');
     INSERT INTO trips(id,owner_id,name,default_currency) VALUES('t1','a','1001札幌','JPY'),('t2','a','1002札幌','JPY');

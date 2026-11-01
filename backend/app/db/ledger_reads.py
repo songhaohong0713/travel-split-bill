@@ -48,6 +48,7 @@ def member_snapshots(session, user_id):
             trip.id,
             {
                 "currency": trip.default_currency,
+                "timezone_offset_minutes": trip.timezone_offset_minutes,
                 "members": members[trip.id],
                 "expenses": expenses[trip.id],
                 "revision": ledgers[trip.id].revision if trip.id in ledgers else 0,

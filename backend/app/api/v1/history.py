@@ -103,7 +103,10 @@ async def prepare_history(
 def plan(old, body, user_id):
     selection = body.model_dump(mode="json", exclude={"token"})
     try:
-        return historical_plan(old, selection, user_id)
+        result = historical_plan(old, selection, user_id)
+        if any(not p.get("offset_only") and p["to_participant_id"] != user_id for p in result["payments"]):
+            raise HTTPException(403, detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认历史已收款；付款方请使用标记付款流程"})
+        return result
     except (ValueError, ArithmeticError) as exc:
         raise HTTPException(
             422, detail={"code": "INVALID_HISTORY_CONFIRMATION", "message": str(exc)}
@@ -118,7 +121,8 @@ async def preview_history(
     session: DbSession,
     user_id: CurrentUser,
 ):
-    await require_owner(trip_id, request, session, user_id)
+    if body.mode == "unpaid":
+        await require_owner(trip_id, request, session, user_id)
     proposed = plan(await snapshot(trip_id, request, session, user_id), body, user_id)
     return {"data": {key: value for key, value in proposed.items() if key != "state"}}
 
@@ -131,7 +135,8 @@ async def confirm_history(
     session: DbSession,
     user_id: CurrentUser,
 ):
-    await require_owner(trip_id, request, session, user_id)
+    if body.mode == "unpaid":
+        await require_owner(trip_id, request, session, user_id)
     old = await snapshot(trip_id, request, session, user_id)
     if old["state"].get("history_confirmation", {}).get("status") != "pending":
         raise conflict()

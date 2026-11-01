@@ -305,3 +305,32 @@ def test_original_file_endpoint_requires_membership_and_returns_original_bytes(
     r = c.get(endpoint, headers=auth())
     assert r.status_code == 404
     assert r.json()["error"]["code"] == "RECEIPT_IMAGE_MISSING"
+
+
+def test_permanently_failed_cleanup_does_not_starve_later_files(ledger):
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    class Storage:
+        def __init__(self):
+            self.deleted = []
+
+        async def delete(self, key):
+            if key.startswith("bad"):
+                raise ReceiptStorageError("forbidden")
+            self.deleted.append(key)
+
+    store = Storage()
+    with db.SessionLocal() as s:
+        for i in range(21):
+            s.add(
+                ReceiptCleanup(
+                    object_key=("bad" if i < 20 else "good") + str(i),
+                    created_at=datetime.now(UTC) + timedelta(seconds=i),
+                )
+            )
+        s.commit()
+        asyncio.run(drain_cleanup(None, s, store))
+        asyncio.run(drain_cleanup(None, s, store))
+        assert store.deleted == ["good20"]
+        assert len(s.scalars(select(ReceiptCleanup)).all()) == 20

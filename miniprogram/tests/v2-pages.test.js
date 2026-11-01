@@ -126,3 +126,21 @@ test('revocation restores both home totals and the trip card balance',async()=>{
  const day=loadPage('day-bill',api),home=loadPage('trips',api);await day.onLoad({tripId:'t',date:'2026-10-07'});await home.loadTrips();assert.equal(home.data.trips[0].state,'settled');
  await day.revoke({currentTarget:{dataset:{id:'p'}}});await home.loadTrips();assert.equal(day.data.day.status,'pending');assert.equal(home.data.trips[0].statusText,'¥30.00');assert.equal(home.data.summaryGroups[0].receivableText,'¥30.00');
 });
+
+ test('member refresh changes names while avatar colors follow stable identity',async()=>{
+ let nickname='小周';let reverse=false;const transfer=()=>({currency:'CNY',amount:'10',from_participant_id:reverse?'me':'friend',to_participant_id:reverse?'friend':'me'});
+ const p=loadPage('day-bill',{getLedger:async()=>({members:['friend','me'],days:[{date:'2026-10-07',status:'pending',groups:[],pending:[transfer()]}],payments:[]}),listExpenses:async()=>[],listTripMembers:async()=>[{id:'me',is_current:true},{id:'friend',nickname}]});
+ await p.onLoad({tripId:'t',date:'2026-10-07'});assert.equal(p.data.transfers[0].fromIsCurrent,false);assert.equal(p.data.transfers[0].toIsCurrent,true);assert.equal(p.data.transfers[0].fromAvatar,'小');
+ nickname='同行新昵称';reverse=true;await p.onShow();assert.equal(p.data.transfers[0].to,'同行新昵称');assert.equal(p.data.transfers[0].fromIsCurrent,true);assert.equal(p.data.transfers[0].toIsCurrent,false);
+ });
+
+ test('settled source bill exposes the destination of its changed balance',async()=>{
+ const p=loadPage('day-bill',{getLedger:async()=>({currency:'CNY',members:['friend','me'],days:[{date:'2026-10-07',status:'settled',groups:[],pending:[]},{date:'2026-10-08',status:'pending',groups:[],pending:[],carry_entries:[{source_date:'2026-10-07',currency:'CNY',amount:'1.00'}]}],payments:[]}),listExpenses:async()=>[],listTripMembers:async()=>[{id:'me',is_current:true},{id:'friend',nickname:'小周'}]});
+ await p.onLoad({tripId:'t',date:'2026-10-07'});assert.equal(p.data.carriedTo.length,1);assert.equal(p.data.carriedTo[0].date,'2026-10-08');assert.equal(p.data.carriedTo[0].amountText,'¥1.00');
+ });
+
+ test('combined share scope follows server normalization before matching payer marks',async()=>{
+ const group={currency:'CNY',amount:'10',from_participant_id:'friend',to_participant_id:'me'};
+ const p=loadPage('day-bill',{getLedger:async()=>({members:['friend','me'],days:[{date:'2026-10-06',status:'settled',groups:[],pending:[]},{date:'2026-10-07',status:'pending',groups:[],pending:[group]}],payments:[],payer_marks:[{...group,id:'mark',dates:['2026-10-07'],marked_by:'friend'}]}),listExpenses:async()=>[],listTripMembers:async()=>[{id:'me',is_current:true},{id:'friend'}],previewPayment:async()=>({dates:['2026-10-07'],groups:[group]})});
+ await p.onLoad({tripId:'t',dates:'2026-10-06,2026-10-07'});assert.deepEqual(Array.from(p.data.scopeDates),['2026-10-07']);assert.equal(p.data.transfers[0].marked,true);assert.doesNotMatch(p.data.scopeMessage,/10月6日/);
+ });

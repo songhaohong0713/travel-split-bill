@@ -78,17 +78,20 @@ def test_final_paid_day_creates_next_day_carry_even_after_trip_end(monkeypatch):
     from app.core.ledger import payment_preview
 
     s = snapshot()
-    s['end_date'] = '2020-01-01'
+    s["end_date"] = "2020-01-01"
     paid(s)
-    s['expenses'][0] = record('old', '2020-01-01', '460')
-    monkeypatch.setattr('app.core.ledger.business_today', lambda: '2020-01-02')
-    days = {d['date']: d for d in project(s)['days']}
-    assert days['2020-01-01']['status'] == 'settled'
-    assert days['2020-01-02']['status'] == 'recording'
-    assert days['2020-01-02']['carry_entries'][0]['amount'] == '30.00'
-    monkeypatch.setattr('app.core.ledger.business_today', lambda: '2020-01-03')
-    assert next(d for d in project(s)['days'] if d['date'] == '2020-01-02')['status'] == 'pending'
-    assert payment_preview(s, ['2020-01-02'])['groups'][0]['amount'] == '30.00'
+    s["expenses"][0] = record("old", "2020-01-01", "460")
+    monkeypatch.setattr("app.core.ledger.business_today", lambda: "2020-01-02")
+    days = {d["date"]: d for d in project(s)["days"]}
+    assert days["2020-01-01"]["status"] == "settled"
+    assert days["2020-01-02"]["status"] == "recording"
+    assert days["2020-01-02"]["carry_entries"][0]["amount"] == "30.00"
+    monkeypatch.setattr("app.core.ledger.business_today", lambda: "2020-01-03")
+    assert (
+        next(d for d in project(s)["days"] if d["date"] == "2020-01-02")["status"]
+        == "pending"
+    )
+    assert payment_preview(s, ["2020-01-02"])["groups"][0]["amount"] == "30.00"
 
 
 def test_adjustment_can_be_settled_then_edited_again_without_reopening_source():
@@ -165,3 +168,17 @@ def test_future_settled_date_carries_forward_not_back_to_today():
     days = {d["date"]: d for d in project(s)["days"]}
     assert days["2099-01-01"]["status"] == "recording"
     assert days["2099-01-02"]["carry_entries"][0]["amount"] == "30.00"
+
+
+def test_fixed_trip_calendar_is_independent_of_request_timezone():
+    from app.core.ledger import trip_today
+
+    now = datetime(2026, 10, 30, 16, 30, tzinfo=UTC)
+    assert trip_today({"timezone_offset_minutes": -540}, now) == "2026-10-31"
+    from app.core.business_time import client_timezone_offset
+
+    token = client_timezone_offset.set(600)
+    try:
+        assert trip_today({"timezone_offset_minutes": -540}, now) == "2026-10-31"
+    finally:
+        client_timezone_offset.reset(token)

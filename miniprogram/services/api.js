@@ -70,7 +70,7 @@ async function createTrip(name, defaultCurrency, clientId) {
   try {
     const capabilities=await request('/v1/capabilities')
     if(!capabilities || capabilities.client_trip_id!==true)throw {statusCode:409,message:'服务尚未升级，暂不能创建旅行，请稍后重试'}
-    return await request('/v1/trips',{method:'POST',data:{client_id:id,name,default_currency:defaultCurrency}})
+    return await request('/v1/trips',{method:'POST',data:{client_id:id,name,default_currency:defaultCurrency,timezone_offset_minutes:new Date().getTimezoneOffset()}})
   }
   catch(error) {
     if(error.statusCode && error.statusCode<500)throw error
@@ -107,10 +107,10 @@ async function requireCalculationVersion(payload) {
   catch(e) { if(e.statusCode===404 || e.statusCode===405)throw {message:'记账服务需要更新，请保留当前内容，更新后再保存'};throw e }
   if(capabilities.calculation_version!=='v2')throw {message:'记账服务需要更新，请保留当前内容，更新后再保存'}
 }
-async function createExpense(tripId, occurredAt, payload) {
+async function createExpense(tripId, occurredAt, payload, idempotencyKey) {
   if(require('./offline-trips').isLocalTrip(tripId))return Promise.reject({message:'旅行尚未同步，请恢复网络后再保存消费'})
   await requireCalculationVersion(payload)
-  return request(`/v1/trips/${tripId}/expenses`, { method: "POST", data: { occurred_at: occurredAt, payload }, header: { "Idempotency-Key": uuid4() } }) }function previewSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/preview`, { method: "POST", data }) }
+  return request(`/v1/trips/${tripId}/expenses`, { method: "POST", data: { occurred_at: occurredAt, payload }, header: { "Idempotency-Key": idempotencyKey || uuid4() } }) }function previewSettlement(tripId, data) { return request(`/v1/trips/${tripId}/settlements/preview`, { method: "POST", data }) }
 function listExpenses(tripId) {
   if(require('./offline-trips').isLocalTrip(tripId))return Promise.resolve([])
   return request(`/v1/trips/${tripId}/expenses`)
@@ -191,3 +191,9 @@ function updateTripName(tripId,name){
  return request(`/v1/trips/${tripId}/name`,{method:'PATCH',data:{name}})
 }
 Object.assign(module.exports,{updateProfile,updateTripName})
+
+function updateTripNickname(tripId,nickname){return request(`/v1/trips/${tripId}/members/me`,{method:"PATCH",data:{nickname}})}
+module.exports.updateTripNickname=updateTripNickname
+
+function setTripTimezone(tripId,offset){return request(`/v1/trips/${tripId}/timezone`,{method:"PATCH",data:{timezone_offset_minutes:offset}})}
+module.exports.setTripTimezone=setTripTimezone

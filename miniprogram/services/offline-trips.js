@@ -13,7 +13,7 @@ function listCachedTrips() {
 }
 function rememberTrips(trips) { const key='travel:v2:trips:'+account(),previous=read(key,[]);wx.setStorageSync(key,trips.map(t=>{const old=previous.find(p=>p.id===t.id)||{};return {...t,_summary:t._summary || old._summary,companion_name:t.companion_name || old.companion_name}}));return listCachedTrips() }
 function enqueueTrip(name,currency,dates={},id=uuid()) {
-  const trip={id,name:name.trim(),default_currency:currency,start_date:dates.start_date || null,end_date:dates.end_date || null,member_count:1,is_owner:true,offline:true,owner_binding:account(),created_at:new Date().toISOString()}
+  const trip={timezone_offset_minutes:new Date().getTimezoneOffset(),id,name:name.trim(),default_currency:currency,start_date:dates.start_date || null,end_date:dates.end_date || null,member_count:1,is_owner:true,offline:true,owner_binding:account(),created_at:new Date().toISOString()}
   const queue=read(QUEUE,[]).filter(t=>t.id!==id)
   wx.setStorageSync(QUEUE,[...queue,trip])
   return trip
@@ -40,7 +40,7 @@ function syncPending(api) {
         wx.setStorageSync(QUEUE,read(QUEUE,[]).map(t=>t.id===trip.id?trip:t))
       }
       try {
-        await api.request('/v1/trips',{method:'POST',data:{client_id:trip.id,name:trip.name,default_currency:trip.default_currency}})
+        await api.request('/v1/trips',{method:'POST',data:{client_id:trip.id,name:trip.name,default_currency:trip.default_currency,timezone_offset_minutes:trip.timezone_offset_minutes}})
         if(trip.start_date || trip.end_date)await api.request(`/v1/trips/${trip.id}`,{method:'PATCH',data:{start_date:trip.start_date,end_date:trip.end_date}})
         wx.setStorageSync(QUEUE,read(QUEUE,[]).filter(t=>t.id!==trip.id))
       } catch(error) {

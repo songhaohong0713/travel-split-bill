@@ -2,6 +2,7 @@ const api=require('../../services/api')
 const ui=require('../../services/ledger-view')
 const money=require('../../services/money')
 const offline=require('../../services/offline-trips')
+const timezoneOptions=Array.from({length:105},(_,i)=>{const offset=720-i*15,minutes=Math.abs(offset);return {offset,label:'UTC'+(offset<=0?'+':'-')+String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0')}})
 const {memberLabelMap}=require('../../services/member-labels')
 Page({
   data:{dayCount:0,hasSummary:false,tripId:'',name:'',currency:'CNY',subtitle:'',days:[],summary:[],pendingDays:0,isOwner:false,memberCount:1,loading:true,error:'',inviteOpen:false,invitePath:'',inviting:false,inviteError:'',dateOpen:false,startDate:'',endDate:''},
@@ -19,7 +20,7 @@ Page({
       const trip=trips.find(t=>t.id===this.data.tripId)
       if(!trip)throw {message:'旅行不存在或你尚未加入'}
       for(const record of records)record.ledger_summary=(ledger.expense_summaries || []).find(x=>x.id===record.id)
-      this.setData({memberRows:members.map(m=>({...m,label:m.is_current?'我':m.nickname || '同行人'})),nickname:(members.find(m=>m.is_current) || {}).nickname || '',draftName:trip.name});const labels=memberLabelMap(members)
+      this.setData({timezoneOffset:trip.timezone_offset_minutes,timezoneNeedsSetup:trip.timezone_offset_minutes==null,timezoneLabels:timezoneOptions.map(t=>t.label),timezoneLabel:(timezoneOptions.find(t=>t.offset===trip.timezone_offset_minutes)||{label:'待创建者补设'}).label,memberRows:members.map(m=>({...m,label:m.is_current?'我':m.nickname || '同行人'})),nickname:(members.find(m=>m.is_current) || {}).nickname || '',draftName:trip.name});const labels=memberLabelMap(members)
       const current=(members.find(m=>m.is_current) || {}).id
       const describe=p=>p.to_participant_id===current ? (labels[p.from_participant_id] || '同行人')+'待付你' : '你待付'+(labels[p.to_participant_id] || '同行人')
       const summary=(ledger.summary || []).filter(p=>!p.offset_only).map(p=>({...p,amountText:money.formatMoney(p.currency,p.amount),direction:describe(p)}))
@@ -52,12 +53,18 @@ Page({
   menu(){this.setData({manageOpen:true,draftName:this.data.name})},
   closeManage(){this.setData({manageOpen:false})},
   onDraftName(e){this.setData({draftName:e.detail.value})},
+  async setTimezone(e){
+    if(!this.data.isOwner||!this.data.timezoneNeedsSetup||this.data.managing)return;
+    const selected=timezoneOptions[Number(e.detail.value)];if(!selected)return;
+    if(!await ui.confirm('将固定使用 '+selected.label+' 判断每日账单是否结束，双方保持一致，设置后不可更改。','设置旅行时区'))return;
+    this.setData({managing:true});try{await api.setTripTimezone(this.data.tripId,selected.offset);await this.reload()}catch(e){this.setData({error:e.message||'时区保存失败'})}finally{this.setData({managing:false})}
+  },
   onNickname(e){this.setData({nickname:e.detail.value})},
   async saveManage(){
     if(this.data.managing)return
     this.setData({managing:true,error:''})
     try{
-      if(this.data.nickname.trim())await api.updateProfile(this.data.nickname.trim())
+      if(this.data.nickname.trim())await api.updateTripNickname(this.data.tripId,this.data.nickname.trim())
       if(this.data.isOwner){
         if(this.data.draftName.trim()!==this.data.name)await api.updateTripName(this.data.tripId,this.data.draftName.trim())
         await api.updateTripDates(this.data.tripId,{start_date:this.data.startDate || null,end_date:this.data.endDate || null})

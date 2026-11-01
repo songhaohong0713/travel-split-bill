@@ -21,7 +21,7 @@ test('FX stale response cannot overwrite current currency and save cannot use ol
  page.data.currency='USD';const second=page.refreshRate();pending[1]({rate:'7',provider:'test',effective_date:'2026-10-26'});await second;pending[0]({rate:'0.05',provider:'test',effective_date:'2026-10-26'});await first;assert.equal(page.data.referenceRate,'7');
 })
 test('blank custom amounts reject instead of assigning all to companion',()=>{assert.match(f.validate({...base,splitMode:'custom',customShares:{a:'',b:'100'}}),/填写金额/)})
-test('actual paid currency becomes authoritative and stale historical rate is removed',()=>{const p=f.buildPayload({...base,currency:'JPY',actualPaymentAmount:'5',actualPaymentCurrency:'USD',referenceRate:'',originalPayload:{expenses:[{reference_rate:'0.05',payment_to_settlement_rate:'7'}]}});assert.equal(p.expenses[0].settlement_currency,'USD');assert.equal(p.settlement_currency,'USD');assert.equal(p.expenses[0].reference_rate,undefined);assert.equal(p.expenses[0].payment_to_settlement_rate,undefined)})
+test('foreign actual debit without a conversion rate cannot save',()=>{assert.match(f.validate({...base,currency:'JPY',actualPaymentAmount:'5',actualPaymentCurrency:'USD'}),/汇率/);})
 test('custom multi-item reload restores whole-bill amounts, not first item amounts',()=>{
  const d={...base,tripId:'t',amount:'100',splitMode:'custom',customShares:{a:'40',b:'60'},items:[{id:'1',name:'a',amount:'50'},{id:'2',name:'b',amount:'50'}]}
  const payload=f.buildPayload(d), hydrated=f.hydrate({id:'r',payload})
@@ -197,3 +197,15 @@ test('switching accounts while the permission request is pending never opens the
  let account='a',resolve,shown=0,downloads=0;const p=pageHarness({getExpenseReceipt:()=>new Promise(r=>resolve=r),downloadExpenseReceipt:async()=>{downloads++;return '/tmp/image'}});
  global.wx.getStorageSync=()=>account;global.wx.previewImage=()=>shown++;global.wx.getImageInfo=o=>o.success({});p.setData({expenseId:'e',receiptJobId:'job',receiptPath:''});const pending=p.previewReceipt();await Promise.resolve();account='b';resolve({status:'available',url:'https://private/image'});await pending;assert.equal(downloads,0);assert.equal(shown,0);assert.match(p.data.receiptError,/登录|账号/);
 });
+
+ test('foreign debit converts to trip currency and requires its own rate',()=>{
+ const d={...base,currency:'JPY',amount:'1000',actualPaymentAmount:'50',actualPaymentCurrency:'USD',paymentToSettlementRate:'7'};
+ assert.equal(f.validate(d),'');const p=f.buildPayload(d);assert.equal(p.settlement_currency,'CNY');assert.deepEqual(p.expenses[0].actual_payment,{currency:'USD',amount:'50'});assert.equal(p.expenses[0].payment_to_settlement_rate,'7');
+ assert.match(f.validate({...d,paymentToSettlementRate:''}),/扣款币种/);
+ assert.deepEqual(f.previewRows(d).map(r=>r.convertedAmount),['175.00','175.00']);
+ assert.equal(f.hydrate({payload:p}).paymentToSettlementRate,'7');
+ });
+ test('saving the same unchanged draft after timeout reuses its idempotency key',async()=>{
+ const keys=[];const page=pageHarness({createExpense:async(t,d,p,key)=>{keys.push(key);if(keys.length===1)throw Error('timeout');return {}}});
+ await page.save();await page.save();assert.ok(keys[0]);assert.equal(keys[0],keys[1]);
+ });

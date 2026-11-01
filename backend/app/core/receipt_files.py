@@ -118,14 +118,16 @@ async def drain_cleanup(cloud, session, storage):
                 "GET",
                 "/receipt_cleanup",
                 params={
-                    "select": "object_key",
-                    "order": "created_at.asc",
+                    "select": "object_key,attempts",
+                    "order": "attempts.asc,created_at.asc",
                     "limit": "20",
                 },
             )
             if cloud
             else session.scalars(
-                select(ReceiptCleanup).order_by(ReceiptCleanup.created_at).limit(20)
+                select(ReceiptCleanup)
+                .order_by(ReceiptCleanup.attempts, ReceiptCleanup.created_at)
+                .limit(20)
             ).all()
         )
         for row in rows:
@@ -140,6 +142,19 @@ async def drain_cleanup(cloud, session, storage):
                     session.delete(row)
                     session.commit()
             except (ReceiptStorageError, CloudBasePgError):
+                try:
+                    if cloud:
+                        await cloud.request(
+                            "PATCH",
+                            "/receipt_cleanup",
+                            params={"object_key": f"eq.{key}"},
+                            payload={"attempts": row.get("attempts", 0) + 1},
+                        )
+                    else:
+                        row.attempts += 1
+                        session.commit()
+                except CloudBasePgError:
+                    logger.warning("receipt_cleanup_retry_update_failed")
                 logger.warning("receipt_cleanup_retry_pending")
     except CloudBasePgError:
         logger.warning("receipt_cleanup_queue_unavailable")

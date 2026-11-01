@@ -22,3 +22,9 @@ test('home cache preserves server summaries across plain trip-list refresh and i
 test('known successful trip deletion removes only this account cached trip and summary',()=>{
  const o=store();o.setAccount('a');o.rememberTrips([{id:'gone'},{id:'keep'}]);o.cacheHomeSummary({summarySource:'gone'});o.setAccount('b');o.rememberTrips([{id:'gone'}]);o.setAccount('a');o.forgetTrip('gone');assert.deepEqual(Array.from(o.listCachedTrips(),t=>t.id),['keep']);assert.equal(o.readHomeSummary(),null);o.setAccount('b');assert.equal(o.listCachedTrips().length,1);
 });
+
+ test('offline synchronization preserves the timezone captured when creating the trip',async()=>{
+ const o=store();o.setAccount('a');const t=o.enqueueTrip('Trip','CNY');const original=t.timezone_offset_minutes;t.timezone_offset_minutes=-540;
+ let body;await o.syncPending({request:async(path,options)=>{if(!options)return {client_trip_id:true};body=options.data}});
+ assert.equal(typeof original,'number');assert.equal(body.timezone_offset_minutes,-540);
+ });

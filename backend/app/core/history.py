@@ -6,7 +6,14 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.core.expense_validation import _check_money
-from app.core.ledger import amount, payment_preview, project, snapshot_token
+from app.core.ledger import (
+    amount,
+    basis_currencies,
+    payment_preview,
+    project,
+    settlement_basis,
+    snapshot_token,
+)
 
 
 def historical_plan(old, selection, user_id):
@@ -25,7 +32,9 @@ def historical_plan(old, selection, user_id):
         "confirmed_at": datetime.now(UTC).isoformat(),
         "mode": selection["mode"],
         "selection": deepcopy(selection),
-        "basis_expenses": deepcopy(old["expenses"]),
+        "basis_revisions": [
+            {"id": r["id"], "revision": r["revision"]} for r in old["expenses"]
+        ],
         "basis_members": list(old["members"]),
         "basis_currency": old["currency"],
         "basis_revision": old["revision"],
@@ -82,12 +91,31 @@ def historical_plan(old, selection, user_id):
             "created_at": datetime.now(UTC).isoformat(),
             "source": "historical_confirmation",
             "paid_on": proposal.get("paid_on") or selection.get("paid_on"),
-            "basis_expenses": [
-                r
-                for r in old["expenses"]
-                if r["occurred_at"] in {a["date"] for a in group["allocations"]}
-            ],
         }
+        scope = {"dates": [a["date"] for a in group["allocations"]]}
+        remaining = payment_preview(stage, scope["dates"])["groups"]
+        outstanding = next(
+            (g for g in remaining if g["currency"] == group["currency"]), None
+        )
+        basis = (
+            settlement_basis(stage, scope, group["currency"])
+            if outstanding
+            and Decimal(outstanding["amount"]) == Decimal(group["amount"])
+            else []
+        )
+        payment["freeze_basis"] = basis
+        payment["basis_currencies"] = basis_currencies(stage, basis)
+        basis_dates = {b["date"] for b in basis}
+        payment["depends_on"] = [
+            p["id"]
+            for p in stage["state"]["payments"]
+            if not p.get("revoked_at")
+            and p["currency"] == group["currency"]
+            and any(
+                a["date"] in basis_dates
+                for a in p["allocations"] + p.get("freeze_basis", [])
+            )
+        ]
         stage["state"]["payments"].append(payment)
         added.append(payment)
     return {

@@ -75,8 +75,8 @@ await compareTables()
 console.log('Restored all 12 tables with exact data equality, constraints, indexes, 16 functions and recorded grants.')
 await db.exec(`SET request.jwt.claims='{"role":"service_role"}';`)
 phase = 'apply incremental migrations'
-for (const file of ['20261021_daily_settlement.sql', '20261022_backend_hardening.sql', '20261022_business_backup.sql']) {
-  await db.exec(fs.readFileSync('infra/cloudbase/' + file, 'utf8'))
+for (const file of ['cloudbase/migrations/20261024010000_daily_settlement.sql', 'cloudbase/migrations/20261024010100_backend_hardening.sql', 'cloudbase/migrations/20261024010200_business_backup.sql']) {
+  await db.exec(fs.readFileSync(file, 'utf8'))
 }
 for (const name of Object.keys(source.tables).filter(n => n !== 'trips')) {
   const restored = (await db.query(`SELECT to_jsonb(t) AS row FROM ${table(name)} t`)).rows.map(r => r.row)

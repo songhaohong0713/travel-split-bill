@@ -12,13 +12,13 @@ test('skipping invite stays skipped on the next visit',async()=>{
 });
 
 test('settings save ignores double taps and blocks deletion while saving',async()=>{
- const a=api();let release,writes=0; a.updateProfile=()=>{writes++;return new Promise(resolve=>release=resolve)};a.updateTripDates=async()=>{};
+ const a=api();let release,writes=0; a.updateTripNickname=()=>{writes++;return new Promise(resolve=>release=resolve)};a.updateTripDates=async()=>{};
  const p=page(a);p.setData({nickname:'小周',isOwner:true,draftName:'东京',name:'东京',tripId:'t'});
  const first=p.saveManage();await p.saveManage();await p.deleteManagedTrip();assert.equal(p.data.managing,true);assert.equal(writes,1);release();await first;assert.equal(p.data.managing,false);
 });
 
 test('settings save gives success feedback only after requests complete',async()=>{
- const a=api(),messages=[];a.updateProfile=async()=>{};a.updateTripDates=async()=>{};const p=page(a,{showToast:o=>messages.push(o.title)});p.setData({nickname:'驴',isOwner:true,draftName:'东京',name:'东京',tripId:'t'});await p.saveManage();assert.ok(messages.includes('已保存设置'));assert.equal(p.data.managing,false);
+ const a=api(),messages=[];a.updateTripNickname=async()=>{};a.updateTripDates=async()=>{};const p=page(a,{showToast:o=>messages.push(o.title)});p.setData({nickname:'驴',isOwner:true,draftName:'东京',name:'东京',tripId:'t'});await p.saveManage();assert.ok(messages.includes('已保存设置'));assert.equal(p.data.managing,false);
 });
 
 test('trip hero distinguishes recording, empty and unavailable summaries',async()=>{
@@ -27,3 +27,12 @@ test('trip hero distinguishes recording, empty and unavailable summaries',async(
  a.getLedger=async()=>({days:[{date:'2026-10-28',status:'recording',count:1,pending:[]}],payments:[],summary:[],members:['a']});await p.reload();assert.equal(p.data.heroState,'recording');
  a.getLedger=async()=>({days:[],payments:[],summary:[],compatibilityError:'服务版本不匹配'});await p.reload();assert.equal(p.data.heroState,'unavailable');assert.equal(p.data.hasSummary,false);
 });
+
+ test('only an owner can set a legacy trip timezone and cancellation does not write',async()=>{
+ const a=api();let writes=0;a.setTripTimezone=async()=>writes++;let allow=false;
+ const p=page(a,{showModal:o=>o.success({confirm:allow})});p.reload=async()=>{};p.setData({tripId:'t',isOwner:false,timezoneNeedsSetup:true});
+ await p.setTimezone({detail:{value:0}});assert.equal(writes,0);
+ p.data.isOwner=true;await p.setTimezone({detail:{value:0}});assert.equal(writes,0);
+ allow=true;await p.setTimezone({detail:{value:0}});assert.equal(writes,1);
+ p.data.timezoneNeedsSetup=false;await p.setTimezone({detail:{value:0}});assert.equal(writes,1);
+ });

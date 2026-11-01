@@ -16,11 +16,12 @@ from app.api.v1.trips import (
 )
 from app.core.ledger import (
     amount,
-    business_today,
+    basis_currencies,
     payment_preview,
     project,
     settlement_basis,
     snapshot_token,
+    trip_today,
 )
 from app.db.ledger_reads import member_snapshots
 from app.db.models import ExpenseRecord, TripLedger, TripMember
@@ -63,7 +64,7 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
         closed = [day for day in ledger["days"] if day["status"] != "recording"]
         pending = []
         if closed and all(day["status"] != "invalid" for day in closed):
-            pending = payment_preview(old)["groups"]
+            pending = payment_preview(old, ledger=ledger)["groups"]
         pending = [
             {
                 **group,
@@ -92,7 +93,11 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
                     (r["occurred_at"] for r in old["expenses"]), default=None
                 ),
                 "settled_at": max(
-                    (p["created_at"] for p in ledger["payments"] if not p.get("revoked_at")),
+                    (
+                        p["created_at"]
+                        for p in ledger["payments"]
+                        if not p.get("revoked_at")
+                    ),
                     default=None,
                 ),
                 "has_recording": any(
@@ -166,6 +171,7 @@ async def snapshot(trip_id, request, session, user_id):
     )
     return {
         "currency": trip.default_currency,
+        "timezone_offset_minutes": trip.timezone_offset_minutes,
         "members": members,
         "revision": ledger.revision if ledger else 0,
         "state": deepcopy(ledger.state_json)
@@ -237,12 +243,15 @@ async def get_ledger(
     old = await snapshot(trip_id, request, session, user_id)
     result = project(old)
     result["contract_version"] = 2
+    result["currency"] = old["currency"]
+    result["timezone_offset_minutes"] = old.get("timezone_offset_minutes")
+    result["business_today"] = trip_today(old)
     result["payer_marks"] = [
         {**m, "stale": m.get("basis_token") != mark_basis_token(old)}
         for m in result["payer_marks"]
     ]
     try:
-        result["summary"] = payment_preview(old)["groups"]
+        result["summary"] = payment_preview(old, ledger=result)["groups"]
     except ValueError as exc:
         result["summary"] = []
         if any(d["status"] in ("pending", "invalid") for d in result["days"]):
@@ -277,7 +286,7 @@ async def close_day(
     old = await snapshot(trip_id, request, session, user_id)
     state = deepcopy(old["state"])
     value = day.isoformat()
-    if value >= business_today():
+    if value >= trip_today(old):
         raise HTTPException(
             422, detail={"code": "DAY_RECORDING", "message": "今天仍在记录中，不能结清"}
         )
@@ -364,7 +373,9 @@ async def mark_payment(
             or mark["amount"] != group["amount"]
         ):
             raise conflict()
-    basis = settlement_basis(old, p, body.currency)
+    basis = settlement_basis(
+        old, {**p, "dates": [a["date"] for a in group["allocations"]]}, body.currency
+    )
     basis_dates = {b["date"] for b in basis}
     payment = {
         **group,
@@ -372,7 +383,7 @@ async def mark_payment(
         "created_at": datetime.now(UTC).isoformat(),
         "created_by": user_id,
         "snapshot_token": body.token,
-        "basis_expenses": deepcopy(old["expenses"]),
+        "basis_currencies": basis_currencies(old, basis),
         "freeze_basis": basis,
         "depends_on": [
             payment["id"]
@@ -411,6 +422,21 @@ async def revoke_payment(
     if payment is None:
         raise _not_found()
     if not payment.get("revoked_at"):
+        dependents = [
+            p
+            for p in state["payments"]
+            if not p.get("revoked_at") and payment_id in p.get("depends_on", [])
+        ]
+        if dependents:
+            dates = sorted({a["date"] for p in dependents for a in p["allocations"]})
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "PAYMENT_DEPENDENCY",
+                    "message": "请先撤销以下日期的后续结清：" + "、".join(dates),
+                    "dates": dates,
+                },
+            )
         payment.update(revoked_at=datetime.now(UTC).isoformat(), revoked_by=user_id)
         await persist(trip_id, request, session, user_id, old, state)
     return {"data": payment}

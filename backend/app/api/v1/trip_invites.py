@@ -17,6 +17,7 @@ from app.api.v1.trips import (
 from app.db.models import Trip, TripInvite, TripMember, User
 from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
+    CloudBasePgRequestError,
     CloudBasePgUnavailable,
 )
 
@@ -63,7 +64,7 @@ async def create_trip_invite(
                     "p_expires_at": expires_at.isoformat(),
                 },
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
@@ -118,58 +119,61 @@ async def get_trip_invite(
                     "limit": "1",
                 },
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(rows, list) or not rows:
             raise _expired()
         invite = cast(dict[str, Any], rows[0])
-        member_rows = await cloudbase.request(
-            "GET",
-            "/trip_members",
-            params={
-                "trip_id": f"eq.{invite['trip_id']}",
-                "user_id": f"eq.{user_id}",
-                "select": "user_id",
-                "limit": "1",
-            },
-        )
-        already_member = bool(member_rows)
-        if not already_member and (
-            invite.get("used_at")
-            or invite.get("revoked_at")
-            or str(invite["expires_at"]) <= _now().isoformat()
-        ):
-            raise _expired()
-        trips = await cloudbase.request(
-            "GET",
-            "/trips",
-            params={
-                "id": f"eq.{invite['trip_id']}",
-                "select": "id,name,owner_id",
-                "limit": "1",
-            },
-        )
-        if not isinstance(trips, list) or not trips:
-            raise _expired()
-        cloud_trip = cast(dict[str, Any], trips[0])
-        names = (
-            await cloudbase.request(
+        try:
+            member_rows = await cloudbase.request(
                 "GET",
-                "/users",
+                "/trip_members",
                 params={
-                    "id": f"eq.{cloud_trip.get('owner_id', '')}",
-                    "select": "nickname",
+                    "trip_id": f"eq.{invite['trip_id']}",
+                    "user_id": f"eq.{user_id}",
+                    "select": "user_id",
                     "limit": "1",
                 },
             )
-            if cloud_trip.get("owner_id")
-            else []
-        )
-        inviter_name = (
-            names[0].get("nickname")
-            if isinstance(names, list) and names and isinstance(names[0], dict)
-            else None
-        )
+            already_member = bool(member_rows)
+            if not already_member and (
+                invite.get("used_at")
+                or invite.get("revoked_at")
+                or str(invite["expires_at"]) <= _now().isoformat()
+            ):
+                raise _expired()
+            trips = await cloudbase.request(
+                "GET",
+                "/trips",
+                params={
+                    "id": f"eq.{invite['trip_id']}",
+                    "select": "id,name,owner_id",
+                    "limit": "1",
+                },
+            )
+            if not isinstance(trips, list) or not trips:
+                raise _expired()
+            cloud_trip = cast(dict[str, Any], trips[0])
+            names = (
+                await cloudbase.request(
+                    "GET",
+                    "/users",
+                    params={
+                        "id": f"eq.{cloud_trip.get('owner_id', '')}",
+                        "select": "nickname",
+                        "limit": "1",
+                    },
+                )
+                if cloud_trip.get("owner_id")
+                else []
+            )
+            inviter_name = (
+                names[0].get("nickname")
+                if isinstance(names, list) and names and isinstance(names[0], dict)
+                else None
+            )
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+            raise _cloudbase_error(exc) from exc
         return {
             "data": {
                 "trip_id": str(cloud_trip["id"]),
@@ -226,7 +230,7 @@ async def accept_trip_invite(
                 "tsb_accept_trip_invite",
                 {"p_token_hash": _hash(token), "p_user_id": user_id},
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("expired"):
             raise _expired()

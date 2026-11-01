@@ -89,7 +89,7 @@ def test_paid_200_then_230_only_30_and_revoke(ledger):
     assert r.status_code == 201, r.text
     assert r.json()["data"]["from_participant_id"] == "b"
     assert r.json()["data"]["to_participant_id"] == "a"
-    assert r.json()["data"]["basis_expenses"][0]["revision"] == 1
+    assert r.json()["data"]["freeze_basis"] == [{"date":"2026-10-07","currency":"CNY","amount":"200.00"}]
     payment_id = r.json()["data"]["id"]
     assert pay(c, base, p).status_code == 409
     body["payload"]["expenses"][0]["items"][0]["amount"]["amount"] = "460"
@@ -276,7 +276,7 @@ def test_history_partial_confirmation_is_explicit_and_does_not_double_count(ledg
             headers=auth("b"),
             json={**selection, "token": token},
         ).status_code
-        == 404
+        == 403
     )
     r = c.post(
         base + "/history/confirm", headers=auth(), json={**selection, "token": token}
@@ -380,7 +380,7 @@ def test_invalid_save_preserves_previous_expense_and_projection(ledger):
         assert len(records) == 1 and records[0].revision == 1
         row = session.get(PaymentRecord, payment["id"])
         assert str(row.amount) == "200.00" and row.revoked_at is not None
-        assert row.payload_json["basis_expenses"][0]["revision"] == 1
+        assert row.payload_json["basis_currencies"] == {"2026-10-07":["CNY"]}
         assert len(session.scalars(select(PaymentAllocationRecord)).all()) == 1
 
 
@@ -470,8 +470,8 @@ def test_unpaid_history_keeps_confirmation_basis_after_expense_deletion(ledger):
         confirmation = session.get(TripLedger, base.rsplit("/", 1)[1]).state_json[
             "history_confirmation"
         ]
-        assert confirmation["basis_expenses"][0]["id"] == saved["id"]
-        assert confirmation["basis_expenses"][0]["revision"] == 1
+        assert confirmation["basis_revisions"][0]["id"] == saved["id"]
+        assert confirmation["basis_revisions"][0]["revision"] == 1
         assert confirmation["selection"]["mode"] == "unpaid"
         assert confirmation["basis_members"] == ["a", "b"]
 

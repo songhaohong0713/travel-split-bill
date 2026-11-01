@@ -3,7 +3,7 @@
 import hashlib
 import json
 from copy import deepcopy
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.api.v1.settlements import ExpenseInput, _grouped_payload
@@ -24,6 +24,13 @@ def snapshot_token(snapshot):
 
 def amount(currency, value):
     return quantized_money(currency, value).amount
+
+
+def trip_today(snapshot, now=None):
+    offset = snapshot.get("timezone_offset_minutes")
+    if offset is None:
+        return business_today(now) if now else business_today()
+    return ((now or datetime.now(UTC)) - timedelta(minutes=offset)).date().isoformat()
 
 
 def _raw_project(snapshot):
@@ -124,23 +131,29 @@ def _raw_project(snapshot):
     }
 
 
-def payment_preview(snapshot, requested_dates=None):
-    ledger = project(snapshot)
+def payment_preview(snapshot, requested_dates=None, *, ledger=None):
+    if (
+        "timezone_offset_minutes" in snapshot
+        and snapshot["timezone_offset_minutes"] is None
+    ):
+        raise ValueError("请旅行创建者先补设结算时区")
+    ledger = project(snapshot) if ledger is None else ledger
     selected = (
         sorted(set(requested_dates))
         if requested_dates is not None
         else sorted(d["date"] for d in ledger["days"] if d["status"] != "recording")
     )
     if not selected:
-        raise ValueError("请先手动结束当天记账")
+        raise ValueError("今天的账单明天才能结清")
     by_date = {d["date"]: d for d in ledger["days"]}
-    if any(day >= business_today() for day in selected):
+    if any(day >= trip_today(snapshot) for day in selected):
         raise ValueError("今天仍在记录中，不能结清")
     if any(
         day not in by_date or by_date[day]["status"] in ("recording", "invalid")
         for day in selected
     ):
         raise ValueError("所选日期仍在记录中或消费数据不完整")
+    selected = [day for day in selected if by_date[day]["pending"]]
     currencies = sorted(
         {p["currency"] for day in selected for p in by_date[day]["pending"]}
     )
@@ -160,6 +173,7 @@ def payment_preview(snapshot, requested_dates=None):
                 ),
             }
             for day in selected
+            if any(p["currency"] == currency for p in by_date[day]["pending"])
         ]
         total = sum((Decimal(a["amount"]) for a in allocations), Decimal(0))
         groups.append(
@@ -206,12 +220,18 @@ def project(snapshot):
     for payment in active:
         if not set(payment.get("depends_on", [])).issubset(active_ids):
             continue
-        evidence = _raw_days(snapshot, payment.get("basis_expenses", []))
-        evidence_dates = {a["date"] for a in payment["allocations"]} | {
-            b["date"] for b in payment.get("freeze_basis", [])
-        }
-        for day in evidence_dates:
-            known_currencies[day] = set(_balances(evidence.get(day, {"groups": []})))
+        if "basis_currencies" in payment:
+            for day, currencies in payment["basis_currencies"].items():
+                known_currencies[day] = set(currencies)
+        else:
+            evidence = _raw_days(snapshot, payment.get("basis_expenses", []))
+            evidence_dates = {a["date"] for a in payment["allocations"]} | {
+                b["date"] for b in payment.get("freeze_basis", [])
+            }
+            for day in evidence_dates:
+                known_currencies[day] = set(
+                    _balances(evidence.get(day, {"groups": []}))
+                )
         if "freeze_basis" in payment:
             for basis in payment["freeze_basis"]:
                 frozen[basis["date"], basis["currency"]] = Decimal(basis["amount"])
@@ -239,7 +259,7 @@ def project(snapshot):
                 balances[day][currency] = balances[day].get(
                     currency, Decimal(0)
                 ) - Decimal(allocation["amount"])
-    today = business_today()
+    today = trip_today(snapshot)
     for day, currency in frozen:
         balances.setdefault(day, {})[currency] = Decimal(0)
     for (day, currency), original in sorted(frozen.items()):
@@ -307,6 +327,11 @@ def project(snapshot):
                 )
             elif value:
                 row["error"] = "请等待同行人加入后结清"
+        if (
+            "timezone_offset_minutes" in snapshot
+            and snapshot["timezone_offset_minutes"] is None
+        ):
+            row["error"] = "请旅行创建者先补设结算时区"
         recording = day >= today
         row["status"] = (
             "invalid"
@@ -355,3 +380,10 @@ def settlement_basis(snapshot, preview, currency):
         }
         for d in sorted(sources)
     ]
+
+
+def basis_currencies(snapshot, basis):
+    raw = _raw_days(snapshot)
+    return {
+        b["date"]: sorted(_balances(raw.get(b["date"], {"groups": []}))) for b in basis
+    }

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select, update
 
 from app.api.dependencies import CurrentUser, DbSession
+from app.core.business_time import client_timezone_offset
 from app.core.expense_validation import validate_expense_payload
 from app.core.money import currency_scale
 from app.core.receipt_files import (
@@ -52,6 +53,7 @@ router = APIRouter(prefix="/v1", tags=["trips"])
 
 
 class CreateTripRequest(BaseModel):
+    timezone_offset_minutes: int | None = Field(default=None, ge=-840, le=720)
     client_id: UUID | None = None
     name: str = Field(min_length=1, max_length=120)
     default_currency: str = Field(pattern=r"^[A-Z]{3}$")
@@ -270,12 +272,15 @@ async def create_trip(
         trip_id = str(body.client_id or uuid4())
         try:
             result = await cloudbase.rpc(
-                "tsb_create_trip",
+                "tsb_create_trip_with_timezone",
                 {
                     "p_trip_id": trip_id,
                     "p_owner_id": user_id,
                     "p_name": body.name,
                     "p_default_currency": body.default_currency,
+                    "p_timezone_offset": body.timezone_offset_minutes
+                    if body.timezone_offset_minutes is not None
+                    else client_timezone_offset.get(),
                 },
             )
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
@@ -327,6 +332,9 @@ async def create_trip(
         owner_id=user_id,
         name=body.name,
         default_currency=body.default_currency,
+        timezone_offset_minutes=body.timezone_offset_minutes
+        if body.timezone_offset_minutes is not None
+        else client_timezone_offset.get(),
     )
     session.add(trip)
     session.flush()
@@ -363,7 +371,7 @@ async def list_trips(
                         "id": "in.("
                         + ",".join(str(row["id"]) for row in typed_rows)
                         + ")",
-                        "select": "id,start_date,end_date",
+                        "select": "id,start_date,end_date,timezone_offset_minutes",
                     },
                 )
                 if typed_rows
@@ -388,6 +396,9 @@ async def list_trips(
                     "default_currency": str(row["default_currency"]),
                     "member_count": int(row.get("member_count", 1)),
                     "is_owner": bool(row.get("is_owner", False)),
+                    "timezone_offset_minutes": dates.get(str(row["id"]), {}).get(
+                        "timezone_offset_minutes"
+                    ),
                     "start_date": dates.get(str(row["id"]), {}).get("start_date"),
                     "end_date": dates.get(str(row["id"]), {}).get("end_date"),
                 }
@@ -407,6 +418,7 @@ async def list_trips(
                 "id": trip.id,
                 "name": trip.name,
                 "default_currency": trip.default_currency,
+                "timezone_offset_minutes": trip.timezone_offset_minutes,
                 "start_date": str(trip.start_date) if trip.start_date else None,
                 "end_date": str(trip.end_date) if trip.end_date else None,
                 "member_count": session.scalar(
@@ -487,7 +499,7 @@ async def list_trip_members(
                 "/trip_members",
                 params={
                     "trip_id": f"eq.{trip_id}",
-                    "select": "user_id,joined_at",
+                    "select": "user_id,joined_at,nickname",
                     "order": "joined_at.asc",
                 },
             )
@@ -532,7 +544,8 @@ async def list_trip_members(
             "data": [
                 {
                     "id": str(row["user_id"]),
-                    "nickname": nicknames.get(str(row["user_id"])),
+                    "nickname": row.get("nickname")
+                    or nicknames.get(str(row["user_id"])),
                     "is_owner": str(row["user_id"]) == owner_id,
                     "is_current": str(row["user_id"]) == user_id,
                 }
@@ -549,7 +562,8 @@ async def list_trip_members(
         "data": [
             {
                 "id": member.user_id,
-                "nickname": (
+                "nickname": member.nickname
+                or (
                     user.nickname
                     if (user := session.get(User, member.user_id))
                     else None
@@ -728,8 +742,14 @@ async def create_expense(
 
     await _validate_expense(trip_id, body.payload, http_request, session, user_id)
     try:
-        await validate_receipt_reference(trip_id, body.payload, _cloudbase(http_request), session)
-    except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        await validate_receipt_reference(
+            trip_id, body.payload, _cloudbase(http_request), session
+        )
+    except (
+        CloudBasePgConfigurationError,
+        CloudBasePgRequestError,
+        CloudBasePgUnavailable,
+    ) as exc:
         raise _cloudbase_error(exc) from exc
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
@@ -813,8 +833,14 @@ async def update_expense(
 ) -> dict[str, dict[str, object]]:
     await _validate_expense(trip_id, body.payload, http_request, session, user_id)
     try:
-        await validate_receipt_reference(trip_id, body.payload, _cloudbase(http_request), session)
-    except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        await validate_receipt_reference(
+            trip_id, body.payload, _cloudbase(http_request), session
+        )
+    except (
+        CloudBasePgConfigurationError,
+        CloudBasePgRequestError,
+        CloudBasePgUnavailable,
+    ) as exc:
         raise _cloudbase_error(exc) from exc
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
@@ -846,7 +872,11 @@ async def update_expense(
         if not {"id", "revision", "occurred_at", "payload"}.issubset(result):
             raise _cloudbase_error(ValueError("incomplete CloudBase update response"))
         typed_result = cast(dict[str, Any], result)
-        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
+        background_tasks.add_task(
+            cleanup_after_request,
+            cloudbase,
+            getattr(http_request.app.state, "receipt_storage", None),
+        )
         return {
             "data": {
                 "id": str(typed_result["id"]),
@@ -865,7 +895,7 @@ async def update_expense(
     )
     if expense is None:
         raise _not_found()
-    previous_job = expense.payload_json.get('receipt_job_id')
+    previous_job = expense.payload_json.get("receipt_job_id")
     result = session.execute(
         update(ExpenseRecord)
         .where(
@@ -885,10 +915,14 @@ async def update_expense(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "REVISION_CONFLICT", "message": "消费记录已被更新"},
         )
-    if previous_job != body.payload.get('receipt_job_id'):
+    if previous_job != body.payload.get("receipt_job_id"):
         cleanup_unreferenced(session, trip_id, previous_job)
     session.commit()
-    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
+    background_tasks.add_task(
+        cleanup_after_request,
+        None,
+        getattr(http_request.app.state, "receipt_storage", None),
+    )
     updated = session.scalar(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
@@ -937,7 +971,11 @@ async def delete_expense(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
-        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
+        background_tasks.add_task(
+            cleanup_after_request,
+            cloudbase,
+            getattr(http_request.app.state, "receipt_storage", None),
+        )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     trip = require_trip_member(session, trip_id, user_id)
@@ -948,7 +986,7 @@ async def delete_expense(
     )
     if expense is None or (expense.owner_id != user_id and trip.owner_id != user_id):
         raise _not_found()
-    previous_job = expense.payload_json.get('receipt_job_id')
+    previous_job = expense.payload_json.get("receipt_job_id")
     result = session.execute(
         delete(ExpenseRecord).where(
             ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id
@@ -958,13 +996,21 @@ async def delete_expense(
         raise _not_found()
     cleanup_unreferenced(session, trip_id, previous_job)
     session.commit()
-    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
+    background_tasks.add_task(
+        cleanup_after_request,
+        None,
+        getattr(http_request.app.state, "receipt_storage", None),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/trips/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trip(
-    trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser, background_tasks: BackgroundTasks
+    trip_id: str,
+    http_request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+    background_tasks: BackgroundTasks,
 ) -> Response:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
@@ -980,11 +1026,17 @@ async def delete_trip(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
-        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
+        background_tasks.add_task(
+            cleanup_after_request,
+            cloudbase,
+            getattr(http_request.app.state, "receipt_storage", None),
+        )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     require_trip_owner(session, trip_id, user_id)
-    for image in session.scalars(select(ReceiptImage).where(ReceiptImage.trip_id == trip_id)).all():
+    for image in session.scalars(
+        select(ReceiptImage).where(ReceiptImage.trip_id == trip_id)
+    ).all():
         queue_image(session, image)
     payment_ids = select(PaymentRecord.id).where(PaymentRecord.trip_id == trip_id)
     session.execute(
@@ -1006,5 +1058,72 @@ async def delete_trip(
     session.execute(delete(TripMember).where(TripMember.trip_id == trip_id))
     session.execute(delete(Trip).where(Trip.id == trip_id))
     session.commit()
-    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
+    background_tasks.add_task(
+        cleanup_after_request,
+        None,
+        getattr(http_request.app.state, "receipt_storage", None),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class TripTimezoneRequest(BaseModel):
+    timezone_offset_minutes: int = Field(ge=-840, le=720)
+
+
+@router.patch("/trips/{trip_id}/timezone")
+async def set_trip_timezone(
+    trip_id: str,
+    body: TripTimezoneRequest,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    cloud = _cloudbase(request)
+    if cloud is not None:
+        try:
+            result = await cloud.rpc(
+                "tsb_set_trip_timezone",
+                {
+                    "p_trip_id": trip_id,
+                    "p_user_id": user_id,
+                    "p_timezone_offset": body.timezone_offset_minutes,
+                },
+            )
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get("not_found"):
+            raise _not_found()
+        if result.get("conflict"):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "TIMEZONE_ALREADY_SET",
+                    "message": "旅行时区已固定，不可修改",
+                },
+            )
+    else:
+        require_trip_owner(session, trip_id, user_id)
+        result = session.execute(
+            update(Trip)
+            .where(
+                Trip.id == trip_id,
+                Trip.owner_id == user_id,
+                Trip.timezone_offset_minutes.is_(None),
+            )
+            .values(timezone_offset_minutes=body.timezone_offset_minutes)
+        )
+        if getattr(result, "rowcount", 0) != 1:
+            session.rollback()
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "TIMEZONE_ALREADY_SET",
+                    "message": "旅行时区已固定，不可修改",
+                },
+            )
+        session.commit()
+    return {"data": {"timezone_offset_minutes": body.timezone_offset_minutes}}

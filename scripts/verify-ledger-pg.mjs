@@ -7,8 +7,8 @@ import { pathToFileURL } from 'node:url'
 const { PGlite } = await import(pathToFileURL(process.argv[2]).href)
 const db = new PGlite()
 await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;')
-for (const file of ['initial_postgresql_schema.sql','20260919_trip_collaboration.sql','20261021_daily_settlement.sql']) {
-  await db.exec(fs.readFileSync(`infra/cloudbase/${file}`,'utf8'))
+for (const file of ['infra/cloudbase/initial_postgresql_schema.sql','infra/cloudbase/20260919_trip_collaboration.sql','cloudbase/migrations/20261024010000_daily_settlement.sql']) {
+  await db.exec(fs.readFileSync(file,'utf8'))
 }
 await db.exec(`SET request.jwt.claims = '{"role":"service_role"}';
 INSERT INTO users(id) VALUES('a'),('b');

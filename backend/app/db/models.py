@@ -54,6 +54,7 @@ class Trip(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
     default_currency: Mapped[str] = mapped_column(String(3))
+    timezone_offset_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     latest_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -72,6 +73,7 @@ class TripMember(Base):
     )
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    nickname: Mapped[str | None] = mapped_column(String(40), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -165,6 +167,7 @@ class ReceiptImage(Base):
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     object_key: Mapped[str] = mapped_column(String(255), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ReceiptJob(Base):
@@ -186,6 +189,7 @@ class ReceiptCleanup(Base):
     __tablename__ = "receipt_cleanup"
     # No trip FK: cleanup survives deletion of the trip and its image metadata.
     object_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
