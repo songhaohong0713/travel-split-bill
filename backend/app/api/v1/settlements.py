@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 import httpx
@@ -42,6 +42,7 @@ class ItemInput(BaseModel):
     allocation: dict[str, str]
     tax_amount: MoneyInput | None = None
     tax_included: bool = False
+    allocation_amounts: dict[str, str] | None = None
 
     def to_line_item(self) -> LineItem:
         return LineItem(
@@ -50,6 +51,7 @@ class ItemInput(BaseModel):
             allocation=Allocation.from_shares(self.allocation),
             tax_amount=self.tax_amount.to_money() if self.tax_amount else None,
             tax_included=self.tax_included,
+            allocation_amounts=self.allocation_amounts,
         )
 
 
@@ -71,6 +73,7 @@ class AdjustmentInput(BaseModel):
 
 
 class ExpenseInput(BaseModel):
+    calculation_version: Literal["legacy", "v2"] = "legacy"
     expense_id: str
     payer_id: str
     items: list[ItemInput] = Field(min_length=1, max_length=1000)
@@ -85,6 +88,7 @@ class ExpenseInput(BaseModel):
 
     def to_expense(self, default_settlement_currency: str) -> Expense:
         return Expense(
+            calculation_version=self.calculation_version,
             expense_id=self.expense_id,
             payer_id=self.payer_id,
             items=tuple(item.to_line_item() for item in self.items),

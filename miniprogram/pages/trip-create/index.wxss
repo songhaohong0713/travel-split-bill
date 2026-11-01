@@ -1,2 +1,4 @@
 @import "../../styles/round2.wxss";
 .heading .title {font-size:46rpx;}.intro {margin-top:10rpx;}.field {margin-top:32rpx;}.hint {font-size:23rpx;margin-top:12rpx;}
+
+.invite-hint{background:var(--brand-green-subtle);color:var(--brand-green);padding:32rpx;border-radius:28rpx;margin-top:32rpx}.invite-hint .block{margin-top:8rpx}

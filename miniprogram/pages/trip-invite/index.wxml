@@ -1,12 +1,7 @@
-<view class="page invite-page">
-  <view class="stamp">TRAVEL TOGETHER</view>
-  <view wx:if="{{loading}}" class="state">正在读取邀请…</view>
-  <view wx:elif="{{error}}" class="state error">{{error}}</view>
-  <view wx:elif="{{invite}}" class="invite-card">
-    <text class="eyebrow">同行邀请</text>
-    <text class="title">加入「{{invite.name}}」</text>
-    <text class="copy">加入后，你们可以共同查看并录入这段旅行的消费。</text>
-    <text class="expires">邀请有效至 {{invite.expires_at}}</text>
-    <button class="primary" bindtap="joinTrip" loading="{{joining}}" disabled="{{joining}}">加入这段旅行</button>
-  </view>
+<view class="screen">
+ <view class="heading"><text class="title">一起记下这段旅程</text><text class="muted block">两个人的旅行，一本清楚的账</text></view>
+ <view wx:if="{{loading}}" class="card loading-card"><view class="skeleton"/><text class="muted block">正在核对邀请和成员状态…</text></view>
+ <view wx:elif="{{invite}}" class="card"><text class="section-title block">{{invite.name}}</text><text class="muted block inviter">{{alreadyMember ? '这是这段旅行的邀请卡，可分享给同行人' : (invite.inviter_name || '旅行发起人') + ' 邀请你共同记账'}}</text><text class="muted block">加入后，可以共同查看和记录消费，按天核对分摊。</text><text class="muted block validity">{{expiresText}}</text><view wx:if="{{alreadyMember}}" class="joined">你已经加入这段旅行</view></view>
+ <text wx:if="{{error}}" class="error">{{error}}</text>
+ <view class="bottom-bar"><button wx:if="{{alreadyMember}}" class="primary" bindtap="enterTrip">进入旅行</button><button wx:elif="{{invite}}" class="primary" loading="{{joining}}" disabled="{{joining}}" bindtap="joinTrip">加入这段旅行</button><button wx:elif="{{!loading}}" class="secondary" bindtap="reload">重试</button></view>
 </view>

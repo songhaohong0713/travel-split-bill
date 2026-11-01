@@ -1,4 +1,5 @@
 import logging
+from io import BytesIO
 from typing import Annotated, Any, Protocol, cast
 from uuid import uuid4
 
@@ -10,12 +11,15 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
+    Response,
     UploadFile,
     status,
 )
+from PIL import Image, UnidentifiedImageError
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.api.v1.trips import _not_found
+from app.core.receipt_files import discard_failed_upload, image_for_job, storage_error
 from app.db.models import ReceiptImage, ReceiptJob
 from app.providers.cloudbase_pg import (
     CloudBasePgClient,
@@ -24,6 +28,7 @@ from app.providers.cloudbase_pg import (
     CloudBasePgUnavailable,
 )
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
+from app.providers.receipt_storage import ReceiptStorageError
 
 router = APIRouter(prefix="/v1", tags=["uploads"])
 logger = logging.getLogger(__name__)
@@ -55,13 +60,17 @@ async def create_receipt_job(
     background_tasks: BackgroundTasks,
     session: DbSession,
     user_id: CurrentUser,
+    recognize: Annotated[bool, Form()] = True,
 ) -> dict[str, object]:
-    if file.content_type != "image/jpeg":
+    if file.content_type not in {"image/jpeg", "image/png", "application/octet-stream"}:
         raise HTTPException(
             status_code=400,
-            detail={"code": "INVALID_RECEIPT_IMAGE", "message": "仅支持 JPEG 小票"},
+            detail={
+                "code": "INVALID_RECEIPT_IMAGE",
+                "message": "请选择 JPEG 或 PNG 小票图片",
+            },
         )
-    image_bytes = await file.read()
+    image_bytes = await file.read(5_000_001)
     if not image_bytes or len(image_bytes) > 5_000_000:
         raise HTTPException(
             status_code=400,
@@ -70,9 +79,45 @@ async def create_receipt_job(
                 "message": "小票图片必须小于 5 MB",
             },
         )
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            if (
+                image.format not in {"JPEG", "PNG"}
+                or image.width * image.height > 40_000_000
+            ):
+                raise ValueError("invalid receipt image")
+            image.load()
+            content_type = "image/png" if image.format == "PNG" else "image/jpeg"
+            ocr_bytes = image_bytes
+            if image.format == "PNG" and recognize:
+                # Keep original PNG bytes in storage; the existing OCR provider accepts JPEG.
+                rgba = image.convert("RGBA")
+                copy = Image.new("RGB", image.size, "white")
+                copy.paste(rgba, mask=rgba.getchannel("A"))
+                buffer = BytesIO()
+                copy.save(buffer, format="JPEG", quality=95)
+                ocr_bytes = buffer.getvalue()
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+    ) as exc:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "INVALID_RECEIPT_IMAGE",
+                "message": "请上传有效的 JPEG 或 PNG 小票图片",
+            },
+        ) from exc
+    storage = getattr(http_request.app.state, "receipt_storage", None)
+    if storage is None:
+        raise storage_error()
     image_id, job_id = str(uuid4()), str(uuid4())
-    key = f"receipts/{user_id}/{trip_id}/{image_id}.jpg"
+    extension = "png" if content_type == "image/png" else "jpg"
+    key = f"{user_id}/{trip_id}/{image_id}.{extension}"
     cloudbase = _cloudbase(http_request)
+    uploaded = False
     if cloudbase is not None:
         try:
             image_result = await cloudbase.rpc(
@@ -86,40 +131,210 @@ async def create_receipt_job(
             )
             if not isinstance(image_result, dict) or image_result.get("not_found"):
                 raise _not_found()
-            await cloudbase.rpc(
-                "tsb_mark_receipt_uploaded",
-                {"p_image_id": image_id, "p_owner_id": user_id},
+            await storage.upload(key, image_bytes, content_type)
+            uploaded = True
+            await cloudbase.request(
+                "PATCH",
+                "/receipt_images",
+                params={"id": f"eq.{image_id}", "owner_id": f"eq.{user_id}"},
+                payload={"status": "stored"},
             )
             result = await cloudbase.rpc(
                 "tsb_create_receipt_job",
                 {"p_job_id": job_id, "p_image_id": image_id, "p_owner_id": user_id},
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+            if not isinstance(result, dict) or result.get("not_found"):
+                raise _not_found()
+        except HTTPException:
+            if uploaded:
+                await discard_failed_upload(storage, key, cloudbase)
+            raise
+        except ReceiptStorageError as exc:
+            raise storage_error() from exc
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
+            if uploaded:
+                await discard_failed_upload(storage, key, cloudbase)
             raise _cloudbase_error(exc) from exc
-        if not isinstance(result, dict) or result.get("not_found"):
-            raise _not_found()
     else:
         from app.api.v1.trips import require_trip_member
 
         require_trip_member(session, trip_id, user_id)
+        try:
+            await storage.upload(key, image_bytes, content_type)
+        except ReceiptStorageError as exc:
+            raise storage_error() from exc
         session.add(
             ReceiptImage(
                 id=image_id,
                 owner_id=user_id,
                 trip_id=trip_id,
                 object_key=key,
-                status="uploaded",
+                status="stored",
             )
         )
         session.add(ReceiptJob(id=job_id, image_id=image_id))
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            await storage.delete(key)
+            raise
 
     provider = getattr(http_request.app.state, "receipt_ai", None)
-    background_tasks.add_task(
-        _complete_receipt_job, cloudbase, session, provider, job_id, image_bytes
-    )
+    if recognize:
+        background_tasks.add_task(
+            _complete_receipt_job, cloudbase, session, provider, job_id, ocr_bytes
+        )
+    else:
+        await _persist_receipt_job(cloudbase, session, job_id, "completed", 0, [], None)
     logger.info("receipt_job queued job_id=%s image_bytes=%s", job_id, len(image_bytes))
     return {"data": {"id": job_id, "status": "queued", "candidates": []}}
+
+
+async def _expense_receipt_image(trip_id, expense_id, request, session, user_id):
+    from sqlalchemy import select
+
+    from app.api.v1.trips import require_trip_member
+    from app.db.models import ExpenseRecord
+
+    cloud = _cloudbase(request)
+    if cloud:
+        member = await cloud.request(
+            "GET",
+            "/trip_members",
+            params={
+                "trip_id": f"eq.{trip_id}",
+                "user_id": f"eq.{user_id}",
+                "select": "id",
+                "limit": "1",
+            },
+        )
+        if not member:
+            raise _not_found()
+        records = await cloud.request(
+            "GET",
+            "/expenses",
+            params={
+                "id": f"eq.{expense_id}",
+                "trip_id": f"eq.{trip_id}",
+                "select": "payload_json",
+                "limit": "1",
+            },
+        )
+        if (
+            not isinstance(records, list)
+            or not records
+            or not isinstance(records[0], dict)
+        ):
+            raise _not_found()
+        payload = records[0]["payload_json"]
+    else:
+        require_trip_member(session, trip_id, user_id)
+        record = session.scalar(
+            select(ExpenseRecord).where(
+                ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id
+            )
+        )
+        if record is None:
+            raise _not_found()
+        payload = record.payload_json
+    job = payload.get("receipt_job_id")
+    if not job:
+        return None, "none"
+    try:
+        image = await image_for_job(trip_id, job, cloud, session)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        return None, "missing"
+    return image, "available"
+
+
+@router.get("/trips/{trip_id}/expenses/{expense_id}/receipt")
+async def get_expense_receipt(
+    trip_id: str,
+    expense_id: str,
+    request: Request,
+    response: Response,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        image, state = await _expense_receipt_image(
+            trip_id, expense_id, request, session, user_id
+        )
+        if image is None:
+            return {"data": {"status": state}}
+        storage = getattr(request.app.state, "receipt_storage", None)
+        if storage is None:
+            raise storage_error()
+        if not await storage.exists(image["object_key"]):
+            return {"data": {"status": "missing"}}
+        return {
+            "data": {
+                "status": "available",
+                "url": await storage.signed_url(image["object_key"]),
+                "expires_in": 300,
+            }
+        }
+    except ReceiptStorageError as exc:
+        raise storage_error() from exc
+    except (
+        CloudBasePgConfigurationError,
+        CloudBasePgRequestError,
+        CloudBasePgUnavailable,
+    ) as exc:
+        raise _cloudbase_error(exc) from exc
+
+
+def _missing_receipt():
+    return HTTPException(
+        404,
+        detail={
+            "code": "RECEIPT_IMAGE_MISSING",
+            "message": "原图不存在，请重新上传小票",
+        },
+    )
+
+
+@router.get("/trips/{trip_id}/expenses/{expense_id}/receipt/file")
+async def download_expense_receipt(
+    trip_id: str,
+    expense_id: str,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    try:
+        image, _ = await _expense_receipt_image(
+            trip_id, expense_id, request, session, user_id
+        )
+        if image is None:
+            raise _missing_receipt()
+        storage = getattr(request.app.state, "receipt_storage", None)
+        if storage is None:
+            raise storage_error()
+        content, content_type = await storage.download(image["object_key"])
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+    except FileNotFoundError as exc:
+        raise _missing_receipt() from exc
+    except ReceiptStorageError as exc:
+        raise storage_error() from exc
+    except (
+        CloudBasePgConfigurationError,
+        CloudBasePgRequestError,
+        CloudBasePgUnavailable,
+    ) as exc:
+        raise _cloudbase_error(exc) from exc
 
 
 async def _complete_receipt_job(

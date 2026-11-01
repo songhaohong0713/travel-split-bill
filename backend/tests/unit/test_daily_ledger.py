@@ -65,7 +65,7 @@ def test_paid_day_frozen_delta_carried_and_undo_restores_original_day():
     days = {d["date"]: d for d in result["days"]}
     assert days["2020-01-01"]["status"] == "settled"
     assert days["2020-01-01"]["pending"] == []
-    target = days[datetime.now(UTC).date().isoformat()]
+    target = days["2020-01-02"]
     assert target["pending"][0]["amount"] == "30.00"
     assert target["carry_entries"][0]["source_date"] == "2020-01-01"
     s["state"]["payments"][0]["revoked_at"] = "now"
@@ -74,13 +74,30 @@ def test_paid_day_frozen_delta_carried_and_undo_restores_original_day():
     assert restored[0]["pending"][0]["amount"] == "230.00"
 
 
+def test_final_paid_day_creates_next_day_carry_even_after_trip_end(monkeypatch):
+    from app.core.ledger import payment_preview
+
+    s = snapshot()
+    s['end_date'] = '2020-01-01'
+    paid(s)
+    s['expenses'][0] = record('old', '2020-01-01', '460')
+    monkeypatch.setattr('app.core.ledger.business_today', lambda: '2020-01-02')
+    days = {d['date']: d for d in project(s)['days']}
+    assert days['2020-01-01']['status'] == 'settled'
+    assert days['2020-01-02']['status'] == 'recording'
+    assert days['2020-01-02']['carry_entries'][0]['amount'] == '30.00'
+    monkeypatch.setattr('app.core.ledger.business_today', lambda: '2020-01-03')
+    assert next(d for d in project(s)['days'] if d['date'] == '2020-01-02')['status'] == 'pending'
+    assert payment_preview(s, ['2020-01-02'])['groups'][0]['amount'] == '30.00'
+
+
 def test_adjustment_can_be_settled_then_edited_again_without_reopening_source():
     from app.core.ledger import payment_preview, settlement_basis
 
     s = snapshot()
     paid(s)
     s["expenses"][0] = record("old", "2020-01-01", "460")
-    s["state"]["closed_dates"].append(datetime.now(UTC).date().isoformat())
+    s["state"]["closed_dates"].append("2020-01-02")
     p = payment_preview(s)
     basis = settlement_basis(s, p, "CNY")
     s["state"]["payments"].append(
@@ -126,7 +143,7 @@ def test_new_currency_on_fully_settled_day_is_also_carried_forward():
     s["expenses"].append(record("yen", "2020-01-01", "1000", "JPY"))
     days = {d["date"]: d for d in project(s)["days"]}
     assert days["2020-01-01"]["status"] == "settled"
-    assert days[datetime.now(UTC).date().isoformat()]["pending"][0]["currency"] == "JPY"
+    assert days["2020-01-02"]["pending"][0]["currency"] == "JPY"
 
 
 def test_business_day_uses_bounded_client_timezone():
@@ -146,5 +163,5 @@ def test_future_settled_date_carries_forward_not_back_to_today():
     s["state"]["payments"][0]["allocations"][0]["date"] = "2099-01-01"
     s["expenses"][0] = record("old", "2099-01-01", "460")
     days = {d["date"]: d for d in project(s)["days"]}
-    assert days["2099-01-01"]["status"] == "settled"
+    assert days["2099-01-01"]["status"] == "recording"
     assert days["2099-01-02"]["carry_entries"][0]["amount"] == "30.00"

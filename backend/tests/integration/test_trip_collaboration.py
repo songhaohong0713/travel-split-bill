@@ -73,8 +73,8 @@ def test_invited_user_can_join_list_and_edit_trip(client: TestClient) -> None:
     members = client.get(f"/v1/trips/{trip_id}/members", headers=auth("peer-b"))
     assert members.status_code == 200
     assert members.json()["data"] == [
-        {"id": "owner-a", "is_owner": True, "is_current": False},
-        {"id": "peer-b", "is_owner": False, "is_current": True},
+        {"id": "owner-a", "nickname": None, "is_owner": True, "is_current": False},
+        {"id": "peer-b", "nickname": None, "is_owner": False, "is_current": True},
     ]
 
     preview = client.post(

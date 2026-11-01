@@ -1,0 +1,36 @@
+# Figma 结构大纲 · v2 · 01b 首页 · 排序与筛选弹层（node 2015:54）
+# 底层页面与 01 首页相同（Sort Button 多一圈 1.5px brand/green 描边，表示弹层由它打开），这里只列出新增的弹层部分。
+# 格式说明见 01-home.txt
+
+  Scrim 375x840 absolute@(0,0) bg=#1A1A17 不透明度 45%
+  Bottom Sheet 375x392 col gap0 pad(10 24 34 24) absolute@(0,448) bg=bg/surface 圆角(左上24 右上24 右下0 左下0)
+    Handle 327x10 row pad(0 0 6 0) main=center
+      Rectangle 36x4 bg=border/divider r2
+    Title Row 327x40 row pad(12 0 8 0) main=space_between cross=center
+      "排序与筛选" 17/Bold text/primary
+      "重置" 14/Regular text/secondary
+    Group · 排序 327x32 row pad(14 0 4 0)
+      "排序" 12/Medium text/secondary
+    Option · 出行日期（已选中） 327x58 row pad(12 0 12 0) main=space_between cross=center
+      Frame col gap2
+        "出行日期" 15/Medium brand/green
+        "最近的旅行在前" 12/Regular text/secondary
+      icon/check 18x18（描边 brand/green）
+    Divider 327x1 bg=border/divider
+    Option · 最近记账 327x58 row pad(12 0 12 0) main=space_between cross=center
+      Frame col gap2
+        "最近记账" 15/Regular text/primary
+        "最近有新消费的在前" 12/Regular text/secondary
+    Divider 327x1 bg=border/divider
+    Option · 待结清优先 327x58 row pad(12 0 12 0) main=space_between cross=center
+      Frame col gap2
+        "待结清优先" 15/Regular text/primary
+        "有钱没算清的排在前面" 12/Regular text/secondary
+    Group · 筛选 327x32 row pad(14 0 4 0)
+      "筛选" 12/Medium text/secondary
+    Toggle · 隐藏已结清 327x58 row pad(12 0 12 0) main=space_between cross=center
+      Frame col gap2
+        "隐藏已结清的旅行" 15/Regular text/primary
+        "已结清 1 段" 12/Regular text/secondary
+      Switch (off) 44x26 row pad(0 2 0 2) cross=center bg=bg/disabled r13
+        Ellipse 22x22 bg=bg/surface 阴影 0 1px 3px rgba(0,0,0,.15)

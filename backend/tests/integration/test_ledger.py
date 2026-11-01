@@ -70,7 +70,7 @@ def preview(c, base, dates=None):
 def pay(c, base, p):
     return c.post(
         base + "/payments",
-        headers=auth("b"),
+        headers=auth(next(g["to_participant_id"] for g in p["groups"] if g["currency"] == "CNY")),
         json={"dates": p["dates"], "token": p["token"], "currency": "CNY"},
     )
 
@@ -492,7 +492,7 @@ def test_unknown_history_remains_visible_and_current_actual_payment_is_allowed(l
     day = c.get(base + "/ledger", headers=auth()).json()["data"]["days"][0]
     assert day["status"] == "settled"
     assert day["original_totals"][0]["amount"] == "400.00"
-    assert day["settled_transfers"][0]["created_by"] == "b"
+    assert day["settled_transfers"][0]["created_by"] == "a"
 
 
 def test_revoking_unrelated_day_does_not_thaw_another_settled_day(ledger):
@@ -518,6 +518,6 @@ def test_revoking_unrelated_day_does_not_thaw_another_settled_day(ledger):
     }
     assert days["2026-10-06"]["status"] == "settled"
     assert (
-        days[datetime.now(UTC).date().isoformat()]["carry_entries"][0]["amount"]
+        days["2026-10-07"]["carry_entries"][0]["amount"]
         == "30.00"
     )

@@ -1,0 +1,26 @@
+# Figma 结构大纲 · v2 · 异常 · 首页（登录未完成）（node 2004:517）
+# 格式说明见 01-home.txt
+# 注意：底部按钮在稿里是 56 高（多了描边），实现时统一为 54。
+
+v2 · 异常 · 首页（登录未完成） 375x812 col bg=bg/page
+  Nav 375x44
+    "我的旅行" 17/Medium text/primary
+  Body 375x724 col gap16 pad(12 24 0 24)
+    Frame col gap4
+      "下午好" 14/Regular text/secondary
+      "下一笔，记到哪段旅程？" 28/Bold text/primary
+    Notice 327x67 row pad(14 12 14 16) main=space_between cross=center bg=status/danger-bg r16
+      Frame col gap2
+        "暂时无法加载你的旅行" 14/Medium status/danger
+        "网络或登录异常，已记录的账单不会丢失" 12/Regular status/danger
+      Retry Button 54x32 pad(7 14 7 14) bg=bg/surface r999
+        "重试" 13/Medium status/danger
+    Skeleton Trip Card ×3 327x82 row pad(22 20 22 20) main=space_between cross=center bg=bg/surface r20
+      Lines col gap10
+        Rectangle 140x16 bg=bg/subtle r6（三张卡分别 140/110/150 宽）
+        Rectangle 190x12 bg=bg/subtle r6（190/160/120 宽）
+      Rectangle 56x14 bg=bg/subtle r6
+  Bottom Bar 375x128 col gap10 pad(14 24 34 24) absolute@(0,684) bg=gradient_linear
+    "恢复后会自动合并，不会重复" 12/Regular text/secondary 居中
+    Button（次级样式）327x54 bg=bg/surface border=bg/subtle r16
+      "仍要先新建旅行" 16/Medium text/primary

@@ -1,6 +1,7 @@
+import asyncio
 import logging
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,6 +12,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.auth import validate_auth_configuration
 from app.api.v1.history import router as history_router
 from app.api.v1.ledger import router as ledger_router
+from app.api.v1.profile import router as profile_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.trip_invites import router as trip_invites_router
@@ -27,7 +29,9 @@ from app.providers.deepseek_receipt_ai import (
     DeepSeekReceiptAi,
     DeepSeekReceiptAiError,
 )
+from app.providers.receipt_storage import ReceiptStorage, ReceiptStorageError
 from app.providers.wechat_auth import WechatAuthError, WechatCode2Session
+from app.worker.receipt_cleanup import cleanup_loop
 
 
 @asynccontextmanager
@@ -36,12 +40,25 @@ async def lifespan(_: FastAPI):
     configure_wechat_auth()
     configure_cloudbase_pg()
     configure_receipt_ai()
+    if getattr(app.state, "receipt_storage", None) is None:
+        try:
+            app.state.receipt_storage = ReceiptStorage.from_environment()
+        except ReceiptStorageError:
+            app.state.receipt_storage = None
+    cleanup_task = asyncio.create_task(cleanup_loop(app)) if isinstance(getattr(app.state, 'receipt_storage', None), ReceiptStorage) else None
     try:
         yield
     finally:
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
         cloud = getattr(app.state, "cloudbase_pg", None)
         if isinstance(cloud, CloudBasePgClient):
             await cloud.aclose()
+        storage = getattr(app.state, "receipt_storage", None)
+        if isinstance(storage, ReceiptStorage):
+            await storage.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -143,6 +160,7 @@ def configure_receipt_ai() -> None:
 
 
 app.include_router(auth_router)
+app.include_router(profile_router)
 app.include_router(ledger_router)
 app.include_router(history_router)
 app.include_router(trips_router)

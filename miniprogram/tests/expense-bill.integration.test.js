@@ -16,6 +16,7 @@ function loadApi(calls) {
         options.success({ statusCode: 201, data: { data: { id: "expense-1" } } })
       },
     },
+    require(name) { return {isLocalTrip:()=>false} },
     module,
     exports: module.exports,
     Promise,

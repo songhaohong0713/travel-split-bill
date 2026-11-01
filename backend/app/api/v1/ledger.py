@@ -16,6 +16,7 @@ from app.api.v1.trips import (
 )
 from app.core.ledger import (
     amount,
+    business_today,
     payment_preview,
     project,
     settlement_basis,
@@ -86,8 +87,13 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
                 "incomplete": any(day["error"] for day in ledger["days"]),
                 "pending_days": sum(day["status"] == "pending" for day in closed),
                 "day_count": len({r["occurred_at"] for r in old["expenses"]}),
+                "expense_count": len(old["expenses"]),
                 "latest_expense_date": max(
                     (r["occurred_at"] for r in old["expenses"]), default=None
+                ),
+                "settled_at": max(
+                    (p["created_at"] for p in ledger["payments"] if not p.get("revoked_at")),
+                    default=None,
                 ),
                 "has_recording": any(
                     d["status"] == "recording" for d in ledger["days"]
@@ -97,6 +103,7 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
         )
     return {
         "data": {
+            "contract_version": 2,
             "trips": summaries,
             "groups": [
                 {
@@ -124,6 +131,7 @@ class Scope(BaseModel):
 
 
 class PaymentRequest(Scope):
+    mark_id: str | None = None
     token: str = Field(min_length=64, max_length=64)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
@@ -228,10 +236,36 @@ async def get_ledger(
 ):
     old = await snapshot(trip_id, request, session, user_id)
     result = project(old)
+    result["contract_version"] = 2
+    result["payer_marks"] = [
+        {**m, "stale": m.get("basis_token") != mark_basis_token(old)}
+        for m in result["payer_marks"]
+    ]
     try:
         result["summary"] = payment_preview(old)["groups"]
-    except ValueError:
+    except ValueError as exc:
         result["summary"] = []
+        if any(d["status"] in ("pending", "invalid") for d in result["days"]):
+            result["summary_error"] = str(exc)
+    result["expense_summaries"] = []
+    totals: dict[str, Decimal] = {}
+    for record in old["expenses"]:
+        day = project(
+            {**old, "expenses": [record], "state": {"closed_dates": [], "payments": []}}
+        )["days"][0]
+        result["expense_summaries"].append(
+            {"id": record["id"], "groups": day["groups"], "error": day["error"]}
+        )
+        for group in day["groups"]:
+            currency = group["currency"]
+            totals[currency] = totals.get(currency, Decimal(0)) + sum(
+                (Decimal(v["amount"]) for v in group["paid_by_participant"].values()),
+                Decimal(0),
+            )
+    result["totals"] = [
+        {"currency": c, "amount": amount(c, value)}
+        for c, value in sorted(totals.items())
+    ]
     result["summary_incomplete"] = any(d["status"] == "invalid" for d in result["days"])
     return {"data": result}
 
@@ -243,6 +277,10 @@ async def close_day(
     old = await snapshot(trip_id, request, session, user_id)
     state = deepcopy(old["state"])
     value = day.isoformat()
+    if value >= business_today():
+        raise HTTPException(
+            422, detail={"code": "DAY_RECORDING", "message": "今天仍在记录中，不能结清"}
+        )
     if value not in {r["occurred_at"] for r in old["expenses"]} and not any(
         d["date"] == value and d["carry_entries"] for d in project(old)["days"]
     ):
@@ -305,6 +343,27 @@ async def mark_payment(
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
         )
+    if not group["offset_only"] and group["to_participant_id"] != user_id:
+        raise HTTPException(
+            403,
+            detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认已收款"},
+        )
+    mark = None
+    if body.mark_id:
+        mark = next(
+            (m for m in old["state"].get("payer_marks", []) if m["id"] == body.mark_id),
+            None,
+        )
+        if (
+            mark is None
+            or mark.get("revoked_at")
+            or mark.get("confirmed_payment_id")
+            or mark["basis_token"] != mark_basis_token(old)
+            or mark["dates"] != p["dates"]
+            or mark["currency"] != body.currency
+            or mark["amount"] != group["amount"]
+        ):
+            raise conflict()
     basis = settlement_basis(old, p, body.currency)
     basis_dates = {b["date"] for b in basis}
     payment = {
@@ -327,6 +386,12 @@ async def mark_payment(
         ],
     }
     state = deepcopy(old["state"])
+    if mark is not None:
+        payment["mark_id"] = mark["id"]
+        for saved_mark in state.get("payer_marks", []):
+            if saved_mark["id"] == mark["id"]:
+                saved_mark["confirmed_payment_id"] = payment["id"]
+                saved_mark["confirmed_at"] = payment["created_at"]
     state["payments"].append(payment)
     await persist(trip_id, request, session, user_id, old, state)
     return {"data": payment}
@@ -349,3 +414,92 @@ async def revoke_payment(
         payment.update(revoked_at=datetime.now(UTC).isoformat(), revoked_by=user_id)
         await persist(trip_id, request, session, user_id, old, state)
     return {"data": payment}
+
+
+def mark_basis_token(old):
+    basis = deepcopy(old)
+    basis.pop("revision", None)
+    basis["state"].pop("payer_marks", None)
+    return snapshot_token(basis)
+
+
+@router.post("/{trip_id}/payments/mark-paid", status_code=201)
+async def mark_paid(
+    trip_id: str,
+    body: PaymentRequest,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    old = await snapshot(trip_id, request, session, user_id)
+    if snapshot_token(old) != body.token:
+        raise conflict()
+    try:
+        p = payment_preview(
+            old, [d.isoformat() for d in body.dates] if body.dates is not None else None
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            422, detail={"code": "INVALID_SETTLEMENT_SCOPE", "message": str(exc)}
+        ) from exc
+    group = next((g for g in p["groups"] if g["currency"] == body.currency), None)
+    if group is None or group["offset_only"]:
+        raise HTTPException(
+            422, detail={"code": "NOTHING_TO_PAY", "message": "没有待付款金额"}
+        )
+    if group["from_participant_id"] != user_id:
+        raise HTTPException(
+            403, detail={"code": "PAYER_REQUIRED", "message": "仅付款方可以标记已付款"}
+        )
+    state = deepcopy(old["state"])
+    marks = state.setdefault("payer_marks", [])
+    for previous in marks:
+        if (
+            not previous.get("revoked_at")
+            and not previous.get("confirmed_payment_id")
+            and previous["currency"] == body.currency
+            and set(previous["dates"]) & set(p["dates"])
+        ):
+            previous.update(
+                revoked_at=datetime.now(UTC).isoformat(),
+                revoked_by=user_id,
+                revoke_reason="superseded",
+            )
+    mark = {
+        **group,
+        "id": str(uuid4()),
+        "dates": p["dates"],
+        "token": body.token,
+        "basis_token": mark_basis_token(old),
+        "marked_by": user_id,
+        "marked_at": datetime.now(UTC).isoformat(),
+    }
+    marks.append(mark)
+    await persist(trip_id, request, session, user_id, old, state)
+    return {"data": mark}
+
+
+@router.post("/{trip_id}/payer-marks/{mark_id}/revoke")
+async def revoke_mark(
+    trip_id: str,
+    mark_id: str,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    old = await snapshot(trip_id, request, session, user_id)
+    state = deepcopy(old["state"])
+    mark = next((m for m in state.get("payer_marks", []) if m["id"] == mark_id), None)
+    if mark is None:
+        raise _not_found()
+    if mark["marked_by"] != user_id:
+        raise HTTPException(
+            403,
+            detail={"code": "PAYER_REQUIRED", "message": "仅付款方可以撤销付款标记"},
+        )
+    if mark.get("confirmed_payment_id"):
+        raise conflict()
+    if not mark.get("revoked_at"):
+        mark.update(revoked_at=datetime.now(UTC).isoformat(), revoked_by=user_id)
+        await persist(trip_id, request, session, user_id, old, state)
+    return {"data": mark}

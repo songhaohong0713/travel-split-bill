@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from app.core.allocation import Allocation, allocate_decimal
 from app.core.money import (
     Money,
+    currency_scale,
     decimal_from_string,
     decimal_to_string,
     quantize_decimal,
@@ -21,6 +22,7 @@ class LineItem:
     allocation: Allocation
     tax_amount: Money | None = None
     tax_included: bool = False
+    allocation_amounts: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class Expense:
     payment_to_settlement_rate_source: str | None = None
     rounding_owner_id: str | None = None
     settlement_currency: str | None = None
+    calculation_version: str = "legacy"
 
 
 @dataclass(frozen=True)
@@ -199,9 +202,31 @@ def _calculate_expense(
         _require_currency(item.amount, source_currency)
         _validate_allocation(item.allocation, participants)
         base_total += item.amount.decimal
-        _append_allocated_component(
-            components, item.amount.decimal, item.allocation, f"item:{item.item_id}"
-        )
+        if expense.calculation_version == "v2" and item.allocation_amounts is not None:
+            exact = {
+                pid: decimal_from_string(value)
+                for pid, value in item.allocation_amounts.items()
+            }
+            if set(exact) != set(item.allocation.participant_ids) or any(
+                pid not in participants for pid in exact
+            ):
+                raise ValueError("exact allocation members must match item allocation")
+            if any(
+                value < 0 or quantize_decimal(value, source_currency) != value
+                for value in exact.values()
+            ):
+                raise ValueError(
+                    "exact allocations must use nonnegative source minor units"
+                )
+            if sum(exact.values(), Decimal(0)) != item.amount.decimal:
+                raise ValueError("exact allocations must total item amount")
+            components.extend(
+                (pid, value, f"item:{item.item_id}") for pid, value in exact.items()
+            )
+        else:
+            _append_allocated_component(
+                components, item.amount.decimal, item.allocation, f"item:{item.item_id}"
+            )
         if item.tax_amount is not None:
             _require_currency(item.tax_amount, source_currency)
             if not item.tax_included:
@@ -234,6 +259,20 @@ def _calculate_expense(
             if adjustment.amount.decimal >= 0:
                 raise ValueError("received adjustments must be negative refunds")
             cash_adjustments.append(adjustment)
+
+    if expense.calculation_version not in ("legacy", "v2"):
+        raise ValueError("unknown calculation version")
+    if expense.calculation_version == "v2":
+        # Quantize each source component before conversion; the payer absorbs tails.
+        quantum = Decimal(1).scaleb(-currency_scale(source_currency))
+        quantized_components = []
+        remainder = Decimal(0)
+        for participant_id, value, reason in components:
+            rounded = value.quantize(quantum, rounding=ROUND_DOWN)
+            remainder += value - rounded
+            quantized_components.append((participant_id, rounded, reason))
+        quantized_components.append((expense.payer_id, remainder, "source_rounding"))
+        components = quantized_components
 
     rate, rate_source, base_paid = _resolve_rate(
         expense=expense,
@@ -288,7 +327,11 @@ def _calculate_expense(
         for participant_id, amount in raw_paid.items()
     }
 
-    rounding_owner = expense.rounding_owner_id or expense.payer_id
+    rounding_owner = (
+        expense.payer_id
+        if expense.calculation_version == "v2"
+        else expense.rounding_owner_id or expense.payer_id
+    )
     if rounding_owner not in participants:
         raise ValueError(f"unknown rounding owner: {rounding_owner}")
     rounding_difference = sum(expense_paid.values(), start=Decimal(0)) - sum(

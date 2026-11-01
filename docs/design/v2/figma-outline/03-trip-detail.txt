@@ -1,0 +1,70 @@
+# Figma 结构大纲 · v2 · 03 旅行详情（按天）（node 2004:161）
+# 格式说明见 01-home.txt
+
+v2 · 03 旅行详情（按天） 375x966 col gap0 bg=bg/page
+  Nav 375x44
+    "旅行详情" 17/Medium text/primary
+    icon/chevron-left 22x22
+  Body 375x776 col gap16 pad(12 24 24 24)
+    Frame 327x63 row main=space_between cross=center
+      Frame 193x63 col gap4
+        "东京" 28/Bold text/primary
+        "10月5日 – 10月8日 · 我和小周" 14/Regular text/secondary
+      Invite Chip 54x34 row pad(8 14 8 14) bg=brand/green-subtle r999
+        "管理" 13/Medium brand/green
+    累计待结清 Card 327x195 col gap4 pad(20 20 20 20) bg=brand/green r24
+      Frame 287x18 row main=space_between cross=center
+        "小周待付你" 13/Regular brand/green-border
+        "不含今天" 12/Regular brand/green-border
+      Frame 140x50 row gap6 cross=center
+        "¥320.00" 36/Bold bg/surface
+      "10月6日、7日 两天未结清 · 今天的还在记录中" 13/Regular brand/green-border
+      Frame 287x57 col pad(10 0 0 0)
+        Settle Together 287x47 row pad(13 0 13 0) main=center cross=center bg=bg/surface r14
+          "合并结清 2 天" 15/Medium brand/green
+    Frame 327x30 row pad(6 0 0 0) main=space_between cross=center
+      "每日账单" 17/Bold text/primary
+      "12 笔 · 19,561 JPY ≈ ¥828.60" 13/Regular text/secondary
+    Day Card（今天·记录中） 327x89 col gap8 pad(18 18 18 18) bg=bg/surface r20
+      Frame 291x25 row main=space_between cross=center
+        "10月8日 周四" 16/Bold text/primary
+        Status Chip row pad(4 10 4 10) bg=bg/page r999
+          "今天 · 记录中" 12/Medium text/secondary
+      Frame 291x20 row main=space_between cross=center
+        "2 笔 · 3,180 JPY" 13/Regular text/secondary
+        Frame row gap4 cross=center
+          "小周应付 ¥42.50" 14/Medium text/primary
+          icon/chevron-right 14x14
+    Day Card（待收款） 327x89 col gap8 pad(18 18 18 18) bg=bg/surface r20
+      Frame 291x25 row main=space_between cross=center
+        "10月7日 周三" 16/Bold text/primary
+        Status Chip row pad(4 10 4 10) bg=status/pending-bg r999
+          "待收款" 12/Medium status/pending
+      Frame 291x20 row main=space_between cross=center
+        "3 笔 · 9,971 JPY" 13/Regular text/secondary
+        Frame row gap4 cross=center
+          "小周应付 ¥235.97" 14/Medium text/primary
+          icon/chevron-right 14x14
+    Day Card（待收款） 327x89 col gap8 pad(18 18 18 18) bg=bg/surface r20
+      Frame 291x25 row main=space_between cross=center
+        "10月6日 周二" 16/Bold text/primary
+        Status Chip row pad(4 10 4 10) bg=status/pending-bg r999
+          "待收款" 12/Medium status/pending
+      Frame 291x20 row main=space_between cross=center
+        "4 笔 · 4,260 JPY" 13/Regular text/secondary
+        Frame row gap4 cross=center
+          "小周应付 ¥84.03" 14/Medium text/primary
+          icon/chevron-right 14x14
+    Day Card（已结清） 327x89 col gap8 pad(18 18 18 18) bg=bg/surface r20
+      Frame 291x25 row main=space_between cross=center
+        "10月5日 周一" 16/Bold text/primary
+        Status Chip row pad(4 10 4 10) bg=brand/green-subtle r999
+          "已结清" 12/Medium brand/green
+      Frame 291x20 row main=space_between cross=center
+        "3 笔 · 2,150 JPY" 13/Regular text/secondary
+        Frame row gap4 cross=center
+          "小周已付 ¥43.80" 14/Medium text/secondary
+          icon/chevron-right 14x14
+  Bottom Bar 375x102 row pad(14 24 34 24) bg=gradient_linear（随页面滚动固定在底部）
+    Primary Button 327x54 row pad(16 0 16 0) main=center cross=center bg=text/primary r16
+      "+ 记一笔" 16/Medium bg/surface

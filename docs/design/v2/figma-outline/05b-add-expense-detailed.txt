@@ -1,0 +1,70 @@
+# Figma 结构大纲 · v2 · 05b 记一笔（详细 · 按商品分摊）（node 2016:85）
+# 顶部 Recognize Row、Amount Card、Fields Card 的前三行与 05 相同（店名「小破化妆品店」、金额「2,964」、换算「≈ ¥125.56 · 汇率见下方」）。
+# 格式说明见 01-home.txt
+
+v2 · 05b 记一笔（详细 · 按商品分摊） 375x1766 col bg=bg/page
+  Body 375x1549 col gap14 pad(12 24 24 24)
+    Fields Card → Split Row 287x72 col pad(16 0 16 0)
+      Frame row main=space_between cross=center
+        "分摊" 14/Regular text/secondary
+        Segmented 142x40 row gap2 pad(3 3 3 3) bg=bg/page r12
+          Frame 60x34 pad(7 16 7 16) r10
+            "平分" 14/Regular text/secondary
+          Frame（选中）74x34 pad(7 16 7 16) bg=bg/surface
+            "按商品" 14/Medium text/primary
+      （按商品模式下不显示 Split Preview，分摊结果见下方「本笔分摊」）
+    商品明细 Card 327x444 col gap12 pad(20 20 20 20) bg=bg/surface r20
+      Header row main=space_between cross=center
+        "商品明细" 17/Bold text/primary
+        "已识别 5 项" 13/Regular text/secondary
+      "点商品名旁的标签，切换「平分 / 我的 / 小周的」" 12/Regular text/secondary
+      Items col
+        Item row gap10 pad(12 0 12 0) cross=center（每行 60 高，行间 1px Divider bg=border/divider）
+          Frame col gap4（撑满）
+            Name Row row gap8 cross=center
+              "化妆水" 15/Medium text/primary
+              Owner Tag pad(2 8 2 8) r10 → 见下方三种样式
+            "1 件" 12/Regular text/secondary
+          "1,280" 15/Medium text/primary（右侧，宽度自适应）
+        商品数据：化妆水 1件 我的 1,280 ／ 面膜 2盒 平分 836 ／ 润唇膏 1支 小周的 528 ／ 卸妆巾 1包 平分 220 ／ 购物袋 — 平分 100
+        Owner Tag 样式：
+          平分   bg=bg/subtle          文字 11/Medium text/secondary
+          我的   bg=text/primary       文字 11/Medium bg/surface
+          小周的 bg=brand/green-subtle 文字 11/Medium brand/green
+      Divider 287x1 bg=border/divider
+      Footer row main=space_between cross=center
+        "+ 添加商品" 14/Medium brand/green
+        "合计 2,964 JPY" 14/Bold text/primary
+    本笔分摊 Card 327x207 col gap12 pad(20 20 20 20) bg=bg/surface r20
+      Header row main=space_between
+        "本笔分摊" 17/Bold text/primary
+        "按商品计算" 13/Regular text/secondary
+      Split Summary col gap10 pad(14 14 14 14) bg=brand/green-subtle r14（结构同 05 的 Split Preview）
+        我（付款人）"1,858 JPY" / "≈ ¥78.71"
+        小周 "1,106 JPY" / "≈ ¥46.85"
+        Divider bg=brand/green-border
+        "你付了全部 2,964 JPY，小周应还你 ¥46.85" 12/Medium brand/green
+    汇率与实际扣款 Card 327x235 col gap16 pad(20 20 20 20) bg=bg/surface r20
+      "汇率与实际扣款" 17/Bold text/primary
+      Rate Block col gap6
+        Rate Row row main=space_between cross=center
+          "汇率" 15/Regular text/primary
+          Frame row gap6 cross=center
+            "1 JPY = 0.04236 CNY" 14/Medium text/primary
+            icon/edit 14x14
+        "10月8日 中间价 · 点右侧数字可修改" 12/Regular text/secondary
+      Divider 287x1 bg=border/divider
+      Actual Charge col gap6
+        "实际扣款（可选）" 12/Medium text/secondary
+        Input 287x48 row pad(13 16 13 16) main=space_between cross=center bg=bg/page r14
+          "信用卡账单上的人民币金额" 15/Regular text/placeholder
+          "元" 15/Regular text/secondary
+        "填写后按实际扣款折算，手续费两人按比例分担" 12/Regular text/secondary
+    账单调整 Card 327x70 row pad(18 20 18 20) main=space_between cross=center bg=bg/surface r20
+      Frame col gap2
+        "账单调整" 15/Medium text/primary
+        "折扣、免税、优惠券、小费" 12/Regular text/secondary
+      "+ 添加" 14/Medium brand/green
+  Bottom Bar 375x129 col gap10 pad(14 24 34 24) cross=center（固定底部）
+    "保存后记入「东京 · 10月8日」· 小周应还你 ¥46.85" 12/Regular text/secondary
+    Actions row gap10："保存并继续"（次）132x54 + "保存"（主）撑满

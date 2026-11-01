@@ -2,25 +2,16 @@
 
 import hashlib
 import json
-from contextvars import ContextVar
 from copy import deepcopy
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.api.v1.settlements import ExpenseInput, _grouped_payload
-from app.core.money import quantized_money
-
-client_timezone_offset: ContextVar[int] = ContextVar(
-    "ledger_timezone_offset", default=0
+from app.core.business_time import (
+    business_today,
+    client_timezone_offset,  # noqa: F401 - compatibility re-export
 )
-
-
-def business_today(now=None):
-    return (
-        ((now or datetime.now(UTC)) - timedelta(minutes=client_timezone_offset.get()))
-        .date()
-        .isoformat()
-    )
+from app.core.money import quantized_money
 
 
 def snapshot_token(snapshot):
@@ -143,6 +134,8 @@ def payment_preview(snapshot, requested_dates=None):
     if not selected:
         raise ValueError("请先手动结束当天记账")
     by_date = {d["date"]: d for d in ledger["days"]}
+    if any(day >= business_today() for day in selected):
+        raise ValueError("今天仍在记录中，不能结清")
     if any(
         day not in by_date or by_date[day]["status"] in ("recording", "invalid")
         for day in selected
@@ -256,7 +249,7 @@ def project(snapshot):
             continue
         target = next(
             (d for d in sorted(dates) if d > day and (d, currency) not in frozen),
-            max(today, (date.fromisoformat(day) + timedelta(days=1)).isoformat()),
+            (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
         )
         while (target, currency) in frozen:
             target = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
@@ -314,12 +307,7 @@ def project(snapshot):
                 )
             elif value:
                 row["error"] = "请等待同行人加入后结清"
-        recording = (
-            day >= today
-            and day not in snapshot["state"]["closed_dates"]
-            and not any(d == day for d, _ in frozen)
-            and not any(a["date"] == day for p in active for a in p["allocations"])
-        )
+        recording = day >= today
         row["status"] = (
             "invalid"
             if row["error"]
@@ -335,6 +323,7 @@ def project(snapshot):
         days.append(row)
     return {
         "days": days,
+        "payer_marks": snapshot["state"].get("payer_marks", []),
         "payments": snapshot["state"]["payments"],
         "revision": snapshot["revision"],
         "members": members,

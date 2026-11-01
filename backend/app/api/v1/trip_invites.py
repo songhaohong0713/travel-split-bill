@@ -14,7 +14,7 @@ from app.api.v1.trips import (
     _not_found,
     require_trip_owner,
 )
-from app.db.models import Trip, TripInvite, TripMember
+from app.db.models import Trip, TripInvite, TripMember, User
 from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
     CloudBasePgUnavailable,
@@ -105,7 +105,7 @@ async def create_trip_invite(
 @router.get("/trip-invites/{token}")
 async def get_trip_invite(
     token: str, http_request: Request, session: DbSession, user_id: CurrentUser
-) -> dict[str, dict[str, str]]:
+) -> dict[str, dict[str, Any]]:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
@@ -114,9 +114,7 @@ async def get_trip_invite(
                 "/trip_invites",
                 params={
                     "token_hash": f"eq.{_hash(token)}",
-                    "used_at": "is.null",
-                    "revoked_at": "is.null",
-                    "select": "trip_id,expires_at",
+                    "select": "trip_id,expires_at,used_at,revoked_at",
                     "limit": "1",
                 },
             )
@@ -125,29 +123,77 @@ async def get_trip_invite(
         if not isinstance(rows, list) or not rows:
             raise _expired()
         invite = cast(dict[str, Any], rows[0])
-        if str(invite["expires_at"]) <= _now().isoformat():
+        member_rows = await cloudbase.request(
+            "GET",
+            "/trip_members",
+            params={
+                "trip_id": f"eq.{invite['trip_id']}",
+                "user_id": f"eq.{user_id}",
+                "select": "user_id",
+                "limit": "1",
+            },
+        )
+        already_member = bool(member_rows)
+        if not already_member and (
+            invite.get("used_at")
+            or invite.get("revoked_at")
+            or str(invite["expires_at"]) <= _now().isoformat()
+        ):
             raise _expired()
         trips = await cloudbase.request(
             "GET",
             "/trips",
-            params={"id": f"eq.{invite['trip_id']}", "select": "id,name", "limit": "1"},
+            params={
+                "id": f"eq.{invite['trip_id']}",
+                "select": "id,name,owner_id",
+                "limit": "1",
+            },
         )
         if not isinstance(trips, list) or not trips:
             raise _expired()
         cloud_trip = cast(dict[str, Any], trips[0])
+        names = (
+            await cloudbase.request(
+                "GET",
+                "/users",
+                params={
+                    "id": f"eq.{cloud_trip.get('owner_id', '')}",
+                    "select": "nickname",
+                    "limit": "1",
+                },
+            )
+            if cloud_trip.get("owner_id")
+            else []
+        )
+        inviter_name = (
+            names[0].get("nickname")
+            if isinstance(names, list) and names and isinstance(names[0], dict)
+            else None
+        )
         return {
             "data": {
                 "trip_id": str(cloud_trip["id"]),
                 "name": str(cloud_trip["name"]),
                 "expires_at": str(invite["expires_at"]),
+                "already_member": already_member,
+                "inviter_name": inviter_name or "旅行发起人",
             }
         }
     invite = session.scalar(
         select(TripInvite).where(TripInvite.token_hash == _hash(token))
     )
-    if (
-        invite is None
-        or invite.used_at is not None
+    if invite is None:
+        raise _expired()
+    already_member = (
+        session.scalar(
+            select(TripMember).where(
+                TripMember.trip_id == invite.trip_id, TripMember.user_id == user_id
+            )
+        )
+        is not None
+    )
+    if not already_member and (
+        invite.used_at is not None
         or invite.revoked_at is not None
         or invite.expires_at <= _now()
     ):
@@ -160,6 +206,11 @@ async def get_trip_invite(
             "trip_id": trip.id,
             "name": trip.name,
             "expires_at": invite.expires_at.isoformat(),
+            "already_member": already_member,
+            "inviter_name": (
+                user.nickname if (user := session.get(User, trip.owner_id)) else None
+            )
+            or "旅行发起人",
         }
     }
 

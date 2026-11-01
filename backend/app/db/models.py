@@ -26,6 +26,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    nickname: Mapped[str | None] = mapped_column(String(40), nullable=True)
     wechat_openid_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -179,6 +180,13 @@ class ReceiptJob(Base):
         JSON, nullable=True
     )
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class ReceiptCleanup(Base):
+    __tablename__ = "receipt_cleanup"
+    # No trip FK: cleanup survives deletion of the trip and its image metadata.
+    object_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ExpenseRecord(Base):

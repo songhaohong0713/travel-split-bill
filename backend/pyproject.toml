@@ -18,6 +18,7 @@ dependencies = [
     "sqlalchemy",
     "tencentcloud-sdk-python>=3.1.174",
     "uvicorn",
+    "pillow>=13.0.0",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,0 +1,56 @@
+# Figma 结构大纲 · v2 · 01 首页（node 2004:24）
+# 格式：图层名 宽x高 col/row gap 间距 pad(上 右 下 左) main=主轴对齐 cross=交叉轴对齐 bg=颜色token border=描边token r圆角
+# 文本："内容" 字号/字重 颜色token
+# 尺寸单位为 px（设计宽 375），小程序换算 1px = 2rpx
+
+v2 · 01 首页 375x840 col gap0 bg=bg/page
+  Nav 375x44
+    "我的旅行" 17/Medium text/primary
+  Body 375x636 col gap16 pad(12 24 0 24)
+    Greeting 327x63 col gap4
+      "下午好" 14/Regular text/secondary
+      "下一笔，记到哪段旅程？" 28/Bold text/primary
+    Summary Card 327x215 col gap12 pad(20 20 20 20) bg=bg/surface r24
+      Frame 287x28 row gap0 main=space_between cross=center
+        "待收款" 13/Regular text/secondary
+        Currency Chip 77x28 row gap0 pad(5 0 5 12) r999
+          "人民币结算" 13/Medium text/secondary
+      Frame 162x62 row gap4 cross=center
+        "¥" 22/Medium text/secondary
+        "320.00" 44/Bold text/primary
+      "来自「东京」· 小周待付你" 13/Regular text/secondary
+      Divider 287x1 bg=bg/subtle
+      Frame 174x18 row gap10 cross=center
+        "你待付 ¥0.00" 13/Regular text/secondary
+        "·" 13/Regular text/secondary
+        "共 3 段旅行" 13/Regular text/secondary
+    Frame 327x34 row gap0 pad(4 0 0 0) main=space_between cross=center
+      "我的旅行" 17/Bold text/primary
+      Sort Button 92x30 row gap4 pad(6 10 6 12) cross=center bg=bg/surface r16
+        "出行日期" 13/Medium text/primary
+        icon/sort 14x14
+    Trip List 327x264 col gap12
+      Trip Card v2 [instance of Trip Card v2 State=待收款] 327x80 row gap14 pad(18 20 18 18) cross=center bg=bg/surface r20
+        "东" 17/Bold brand/green
+        "东京" 17/Bold text/primary
+        "进行中" 11/Medium brand/green
+        "10/05 – 10/08 · 我和小周" 13/Regular text/secondary
+        "¥320.00" 16/Bold brand/green
+        "小周待付你" 12/Regular text/secondary
+      Trip Card v2 [instance of Trip Card v2 State=待邀请] 327x80 row gap14 pad(18 20 18 18) cross=center bg=bg/surface r20
+        "府" 17/Bold status/pending
+        "府中" 17/Bold text/primary
+        "10/04 · 1 天" 13/Regular text/secondary
+        "去邀请" 14/Medium status/pending
+        "只有你一人" 12/Regular text/secondary
+      Trip Card v2 [instance of Trip Card v2 State=已结清] 327x80 row gap14 pad(18 20 18 18) cross=center bg=bg/surface r20
+        "札" 17/Bold text/secondary
+        "札幌" 17/Bold text/primary
+        "10/01 – 10/03 · 我和阿杰" 13/Regular text/secondary
+        "已结清" 14/Medium text/secondary
+        "10/03 结清" 12/Regular text/secondary
+  Bottom Bar 375x102 row gap10 pad(14 24 34 24) absolute@(0,738) bg=gradient_linear（bg/page 透明→不透明，22% 处完全不透明）
+    Primary Button 207x54 row gap0 pad(16 0 16 0) main=center cross=center bg=text/primary r16
+      "+ 记一笔" 16/Medium bg/surface
+    Secondary Button 110x54 row gap0 pad(16 22 16 22) main=center cross=center bg=bg/surface border=bg/subtle r16
+      "新建旅行" 16/Medium text/primary

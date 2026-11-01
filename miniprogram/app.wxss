@@ -1,1 +1,1 @@
-page { background: #F6F4F0; color: #1A1A17; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+@import "styles/tokens.wxss";

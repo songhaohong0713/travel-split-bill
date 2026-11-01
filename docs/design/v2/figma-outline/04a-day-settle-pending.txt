@@ -1,0 +1,73 @@
+# Figma 结构大纲 · v2 · 04a 当天结算（待收款 · 我是收款方）（node 2004:244）
+# 格式说明见 01-home.txt
+# 注意：两个次按钮在稿里是 141x44 / 139x42，实现时统一为等宽、44 高。
+
+v2 · 04a 当天结算（待收款 · 我是收款方） 375x1058 col bg=bg/page
+  Nav 375x44
+    "当天账单" 17/Medium text/primary
+    icon/chevron-left 22x22
+  Body 375x868 col gap16 pad(12 24 24 24)
+    Frame 327x63 row main=space_between cross=center
+      Frame 168x63 col gap4
+        "10月7日 周三" 28/Bold text/primary
+        "东京 · 3 笔 · 9,971 JPY" 14/Regular text/secondary
+      Status Chip 63x30 row pad(6 12 6 12) bg=status/pending-bg r999
+        "待收款" 13/Medium status/pending
+    转账 Card 327x294 col gap14 pad(20 20 20 20) bg=bg/surface r24
+      Frame 287x24 row main=space_between cross=center
+        "收款" 17/Bold text/primary
+        "共 1 笔" 12/Regular text/secondary
+      Transfer Row 287x78 row pad(16 16 16 16) main=space_between cross=center bg=bg/page r18
+        Frame 110x36 row gap10 cross=center
+          Avatar 36x36 main=center cross=center bg=brand/green-subtle r18
+            "周" 14/Bold brand/green
+          icon/arrow-right 18x18
+          Avatar 36x36 main=center cross=center bg=text/primary r18
+            "我" 14/Bold bg/surface
+        Frame 86x46 col cross=max
+          "¥235.97" 22/Bold text/primary
+          "人民币" 11/Regular text/secondary
+      "小周付给你 · 按 1 JPY = 0.04236 CNY 换算" 13/Regular text/secondary
+      Frame 287x44 row gap8
+        Secondary Button 141x44 row pad(11 0 11 0) main=center cross=center bg=bg/surface border=bg/subtle r12
+          "复制账单" 14/Medium text/primary
+        Secondary Button 139x42 row pad(11 0 11 0) main=center cross=center bg=brand/green-subtle r12
+          "微信提醒小周" 14/Medium brand/green
+      "小周标记付款后会通知你；收到钱再点「确认已收款」。" 12/Regular text/secondary
+    分摊明细 Card 327x159 col gap12 pad(20 20 20 20) bg=bg/surface r24
+      "分摊明细" 17/Bold text/primary
+      Frame 287x17 row gap8 cross=center（三列：成员 103 / 实际支付 84 右对齐 / 应承担 84 右对齐）
+        "成员" 12/Regular text/secondary
+        "实际支付（元）" 12/Regular text/secondary
+        "应承担（元）" 12/Regular text/secondary
+      Frame 287x21 row gap8 cross=center
+        "我" 15/Medium text/primary
+        "¥422.38" 15/Regular text/primary
+        "¥186.41" 15/Bold text/primary
+      Frame 287x21 row gap8 cross=center
+        "小周" 15/Medium text/primary
+        "¥0.00" 15/Regular text/primary
+        "¥235.97" 15/Bold text/primary
+    当天消费 Card 327x268 col pad(20 20 6 20) bg=bg/surface r24
+      Frame 287x32 row pad(0 0 8 0) main=space_between cross=center
+        "当天消费" 17/Bold text/primary
+        "共 3 笔" 13/Regular text/secondary
+      Divider 287x1 bg=bg/subtle
+      Expense Row 287x69 row pad(14 0 14 0) main=space_between cross=center
+        Frame col gap2
+          "药妆店" 16/Medium text/primary
+          "1 项 · 我付" 12/Regular text/secondary
+        Frame row gap8 cross=center
+          Frame col cross=max
+            "1,280 JPY" 16/Bold text/primary
+            "≈ ¥54.22" 12/Regular text/secondary
+          icon/chevron-right 16x16
+      Divider 287x1 bg=bg/subtle
+      Expense Row 287x69（同上）
+        "小破化妆品店" / "5 项 · 我付" / "2,964 JPY" / "≈ ¥125.56"
+      Divider 287x1 bg=bg/subtle
+      Expense Row 287x69（同上）
+        "DHC 油" / "1 项 · 我付" / "5,727 JPY" / "≈ ¥242.60"
+  Bottom Bar 375x102 row pad(14 24 34 24) bg=gradient_linear（固定底部）
+    Primary Button 327x54 row pad(16 0 16 0) main=center cross=center bg=text/primary r16
+      "确认已收款 ¥235.97" 16/Medium bg/surface

@@ -3,7 +3,16 @@ from datetime import date
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select, update
@@ -11,6 +20,12 @@ from sqlalchemy import delete, func, select, update
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.expense_validation import validate_expense_payload
 from app.core.money import currency_scale
+from app.core.receipt_files import (
+    cleanup_after_request,
+    cleanup_unreferenced,
+    queue_image,
+    validate_receipt_reference,
+)
 from app.db.models import (
     ExpenseRecord,
     IdempotencyRecord,
@@ -37,6 +52,7 @@ router = APIRouter(prefix="/v1", tags=["trips"])
 
 
 class CreateTripRequest(BaseModel):
+    client_id: UUID | None = None
     name: str = Field(min_length=1, max_length=120)
     default_currency: str = Field(pattern=r"^[A-Z]{3}$")
 
@@ -61,6 +77,59 @@ class TripDatesRequest(BaseModel):
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("结束日期不能早于开始日期")
         return self
+
+
+class TripNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value):
+        if not value.strip():
+            raise ValueError("请输入旅行名称")
+        return value.strip()
+
+
+@router.patch("/trips/{trip_id}/name")
+async def update_trip_name(
+    trip_id: str,
+    body: TripNameRequest,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    cloud = _cloudbase(request)
+    if cloud is not None:
+        try:
+            rows = await cloud.request(
+                "GET",
+                "/trips",
+                params={
+                    "id": f"eq.{trip_id}",
+                    "owner_id": f"eq.{user_id}",
+                    "select": "id",
+                    "limit": "1",
+                },
+            )
+            if not rows:
+                raise _not_found()
+            await cloud.request(
+                "PATCH",
+                "/trips",
+                params={"id": f"eq.{trip_id}", "owner_id": f"eq.{user_id}"},
+                payload={"name": body.name},
+            )
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
+            raise _cloudbase_error(exc) from exc
+    else:
+        trip = require_trip_owner(session, trip_id, user_id)
+        trip.name = body.name
+        session.commit()
+    return {"data": {"name": body.name}}
 
 
 class UpdateExpenseRequest(BaseModel):
@@ -178,6 +247,17 @@ def require_trip_owner(session: DbSession, trip_id: str, user_id: str) -> Trip:
     return trip
 
 
+@router.get("/capabilities")
+async def capabilities(user_id: CurrentUser):
+    return {
+        "data": {
+            "client_trip_id": True,
+            "settlement_flow": "recipient_confirmation",
+            "calculation_version": "v2",
+        }
+    }
+
+
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
 async def create_trip(
     body: CreateTripRequest,
@@ -187,7 +267,7 @@ async def create_trip(
 ) -> dict[str, dict[str, str]]:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
-        trip_id = str(uuid4())
+        trip_id = str(body.client_id or uuid4())
         try:
             result = await cloudbase.rpc(
                 "tsb_create_trip",
@@ -202,6 +282,14 @@ async def create_trip(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict):
             raise _cloudbase_error(ValueError("invalid CloudBase trip response"))
+        if result.get("conflict"):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "TRIP_ID_CONFLICT",
+                    "message": "Trip identifier already exists with different data",
+                },
+            )
         typed_result = cast(dict[str, Any], result)
         return {
             "data": {
@@ -211,9 +299,34 @@ async def create_trip(
             }
         }
 
+    if body.client_id is not None:
+        existing = session.get(Trip, str(body.client_id))
+        if existing is not None:
+            if (
+                existing.owner_id != user_id
+                or existing.name != body.name
+                or existing.default_currency != body.default_currency
+            ):
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "TRIP_ID_CONFLICT",
+                        "message": "Trip identifier already exists with different data",
+                    },
+                )
+            return {
+                "data": {
+                    "id": existing.id,
+                    "name": existing.name,
+                    "default_currency": existing.default_currency,
+                }
+            }
     _ensure_user(session, user_id)
     trip = Trip(
-        owner_id=user_id, name=body.name, default_currency=body.default_currency
+        id=str(body.client_id or uuid4()),
+        owner_id=user_id,
+        name=body.name,
+        default_currency=body.default_currency,
     )
     session.add(trip)
     session.flush()
@@ -398,10 +511,28 @@ async def list_trip_members(
                 "",
             )
         )
+        nick_rows = (
+            await cloudbase.request(
+                "GET",
+                "/users",
+                params={
+                    "id": "in.(" + ",".join(str(row["user_id"]) for row in rows) + ")",
+                    "select": "id,nickname",
+                },
+            )
+            if rows
+            else []
+        )
+        nicknames = (
+            {str(row["id"]): row.get("nickname") for row in nick_rows}
+            if isinstance(nick_rows, list)
+            else {}
+        )
         return {
             "data": [
                 {
                     "id": str(row["user_id"]),
+                    "nickname": nicknames.get(str(row["user_id"])),
                     "is_owner": str(row["user_id"]) == owner_id,
                     "is_current": str(row["user_id"]) == user_id,
                 }
@@ -418,6 +549,11 @@ async def list_trip_members(
         "data": [
             {
                 "id": member.user_id,
+                "nickname": (
+                    user.nickname
+                    if (user := session.get(User, member.user_id))
+                    else None
+                ),
                 "is_owner": member.user_id == member_trip.owner_id,
                 "is_current": member.user_id == user_id,
             }
@@ -591,6 +727,10 @@ async def create_expense(
         ) from exc
 
     await _validate_expense(trip_id, body.payload, http_request, session, user_id)
+    try:
+        await validate_receipt_reference(trip_id, body.payload, _cloudbase(http_request), session)
+    except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        raise _cloudbase_error(exc) from exc
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         expense_id = str(uuid4())
@@ -669,8 +809,13 @@ async def update_expense(
     http_request: Request,
     session: DbSession,
     user_id: CurrentUser,
+    background_tasks: BackgroundTasks,
 ) -> dict[str, dict[str, object]]:
     await _validate_expense(trip_id, body.payload, http_request, session, user_id)
+    try:
+        await validate_receipt_reference(trip_id, body.payload, _cloudbase(http_request), session)
+    except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        raise _cloudbase_error(exc) from exc
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         try:
@@ -701,6 +846,7 @@ async def update_expense(
         if not {"id", "revision", "occurred_at", "payload"}.issubset(result):
             raise _cloudbase_error(ValueError("incomplete CloudBase update response"))
         typed_result = cast(dict[str, Any], result)
+        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
         return {
             "data": {
                 "id": str(typed_result["id"]),
@@ -719,6 +865,7 @@ async def update_expense(
     )
     if expense is None:
         raise _not_found()
+    previous_job = expense.payload_json.get('receipt_job_id')
     result = session.execute(
         update(ExpenseRecord)
         .where(
@@ -738,7 +885,10 @@ async def update_expense(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "REVISION_CONFLICT", "message": "消费记录已被更新"},
         )
+    if previous_job != body.payload.get('receipt_job_id'):
+        cleanup_unreferenced(session, trip_id, previous_job)
     session.commit()
+    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
     updated = session.scalar(
         select(ExpenseRecord).where(
             ExpenseRecord.id == expense_id,
@@ -766,6 +916,7 @@ async def delete_expense(
     http_request: Request,
     session: DbSession,
     user_id: CurrentUser,
+    background_tasks: BackgroundTasks,
 ) -> Response:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
@@ -786,6 +937,7 @@ async def delete_expense(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
+        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     trip = require_trip_member(session, trip_id, user_id)
@@ -796,6 +948,7 @@ async def delete_expense(
     )
     if expense is None or (expense.owner_id != user_id and trip.owner_id != user_id):
         raise _not_found()
+    previous_job = expense.payload_json.get('receipt_job_id')
     result = session.execute(
         delete(ExpenseRecord).where(
             ExpenseRecord.id == expense_id, ExpenseRecord.trip_id == trip_id
@@ -803,13 +956,15 @@ async def delete_expense(
     )
     if getattr(result, "rowcount", 0) != 1:
         raise _not_found()
+    cleanup_unreferenced(session, trip_id, previous_job)
     session.commit()
+    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/trips/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trip(
-    trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
+    trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser, background_tasks: BackgroundTasks
 ) -> Response:
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
@@ -825,9 +980,12 @@ async def delete_trip(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
+        background_tasks.add_task(cleanup_after_request, cloudbase, getattr(http_request.app.state, 'receipt_storage', None))
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     require_trip_owner(session, trip_id, user_id)
+    for image in session.scalars(select(ReceiptImage).where(ReceiptImage.trip_id == trip_id)).all():
+        queue_image(session, image)
     payment_ids = select(PaymentRecord.id).where(PaymentRecord.trip_id == trip_id)
     session.execute(
         delete(PaymentAllocationRecord).where(
@@ -848,4 +1006,5 @@ async def delete_trip(
     session.execute(delete(TripMember).where(TripMember.trip_id == trip_id))
     session.execute(delete(Trip).where(Trip.id == trip_id))
     session.commit()
+    background_tasks.add_task(cleanup_after_request, None, getattr(http_request.app.state, 'receipt_storage', None))
     return Response(status_code=status.HTTP_204_NO_CONTENT)

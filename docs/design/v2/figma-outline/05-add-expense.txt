@@ -1,0 +1,84 @@
+# Figma 结构大纲 · v2 · 05 记一笔（确认）（node 2004:439）
+# 格式说明见 01-home.txt
+
+v2 · 05 记一笔（确认） 375x991 col bg=bg/page
+  Nav 375x44
+    "记一笔" 17/Medium text/primary
+    icon/chevron-left 22x22
+  Body 375x774 col gap14 pad(12 24 24 24)
+    Recognize Row 327x29 row main=space_between cross=center
+      Recognized Tag 150x29 row gap6 pad(6 12 6 10) cross=center bg=brand/green-subtle r999
+        icon/check 14x14
+        "已识别小票，请核对" 12/Medium brand/green
+      "查看小票原图" 13/Medium brand/green
+    Amount Card 327x157 col gap6 pad(20 22 20 22) bg=bg/surface r24（左对齐）
+      Store Row row gap6 cross=center
+        "药妆店" 16/Medium text/primary
+        icon/edit 16x16
+      Frame row gap10 cross=baseline
+        "1,280" 48/Bold text/primary
+        Currency Chip 65x30 row gap4 pad(6 12 6 12) cross=center bg=bg/page r999
+          "JPY" 13/Medium text/primary
+          icon/chevron-down 14x14
+      "≈ ¥54.22 · 汇率 1 JPY = 0.04236 CNY" 13/Regular text/secondary
+    Fields Card 327x438 col pad(4 20 4 20) bg=bg/surface r24
+      Frame 287x53 row pad(16 0 16 0) main=space_between cross=center
+        "旅行" 14/Regular text/secondary
+        Frame row gap6 cross=center
+          "东京" 15/Medium text/primary
+          "进行中" 12/Regular brand/green
+          icon/chevron-down 14x14
+      Divider 287x1 bg=bg/subtle
+      Date Row 287x98 col gap10 pad(16 0 16 0)
+        Frame row main=space_between cross=center
+          "日期" 14/Regular text/secondary
+          "与小票日期一致" 12/Regular brand/green
+        Frame row gap8
+          Date Chip (selected) 101x36 pad(8 16 8 16) bg=text/primary r999
+            "今天 10/08" 14/Medium bg/surface
+          Date Chip 62x36 pad(8 16 8 16) bg=bg/surface border=bg/subtle r999
+            "昨天" 14/Medium text/primary
+          Date Chip 76x36 pad(8 16 8 16) bg=bg/surface border=bg/subtle r999
+            "选日期" 14/Medium text/primary
+      Divider 287x1 bg=bg/subtle
+      Frame 287x53 row pad(16 0 16 0) main=space_between cross=center
+        "付款人" 14/Regular text/secondary
+        Frame row gap6 cross=center
+          "我" 15/Medium text/primary
+          icon/chevron-down 14x14
+      Divider 287x1 bg=bg/subtle
+      Split Row 287x223 col gap12 pad(16 0 16 0)
+        Frame row main=space_between cross=center
+          "分摊" 14/Regular text/secondary
+          Segmented 142x40 row gap2 pad(3 3 3 3) bg=bg/page r12
+            Frame（选中）60x34 pad(7 16 7 16) bg=bg/surface r10
+              "平分" 14/Medium text/primary
+            Frame 74x34 pad(7 16 7 16)
+              "自定义" 14/Regular text/secondary
+        Split Preview 287x139 col gap10 pad(14 14 14 14) bg=brand/green-subtle r14
+          Share · 我（付款人） row gap10 cross=center
+            Avatar 28x28 bg=text/primary r14 → "我" 12/Bold bg/surface
+            "我（付款人）" 14/Medium text/primary（撑满）
+            Frame col cross=max
+              "640 JPY" 14/Bold text/primary
+              "≈ ¥27.11" 12/Regular text/secondary
+          Share · 小周 row gap10 cross=center
+            Avatar 28x28 bg=bg/surface r14 → "周" 12/Bold brand/green
+            "小周" 14/Medium text/primary
+            Frame col cross=max
+              "640 JPY" 14/Bold text/primary
+              "≈ ¥27.11" 12/Regular text/secondary
+          Divider 1px bg=brand/green-border
+          "你付了全部 1,280 JPY，小周应还你 ¥27.11" 12/Medium brand/green
+    More Options 327x72 row pad(16 20 16 20) main=space_between cross=center bg=bg/surface r24
+      Frame col gap2
+        "更多选项" 15/Medium text/primary
+        "商品明细（已识别 1 项）· 账单调整" 12/Regular text/secondary
+      icon/chevron-down 16x16   ← 点击展开为 05b 的详细版
+  Bottom Bar 375x129 col gap10 pad(14 24 34 24) cross=center bg=gradient_linear（固定底部）
+    "保存后记入「东京 · 10月8日」账单" 12/Regular text/secondary
+    Actions 327x54 row gap10
+      Secondary Button 132x54 pad(16 22 16 22) bg=bg/surface border=bg/subtle r16
+        "保存并继续" 16/Medium text/primary
+      Primary Button 185x54（撑满）bg=text/primary r16
+        "保存" 16/Medium bg/surface

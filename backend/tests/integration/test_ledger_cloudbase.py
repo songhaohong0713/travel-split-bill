@@ -54,7 +54,7 @@ class LedgerCloud:
 def test_cloudbase_recomputes_and_commits_expected_snapshot(monkeypatch):
     cloud = LedgerCloud()
     monkeypatch.setattr(app.state, "cloudbase_pg", cloud, raising=False)
-    headers = {"Authorization": f"Bearer {create_access_token('b')}"}
+    headers = {"Authorization": f"Bearer {create_access_token('a')}"}
     with TestClient(app) as c:
         p = c.post("/v1/trips/t/payments/preview", headers=headers, json={}).json()[
             "data"

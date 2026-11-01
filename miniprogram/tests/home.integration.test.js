@@ -2,8 +2,8 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 function page(name,api,wx={}){
  let definition
  const uiModule={exports:{}}
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../services/ledger-view.js'),'utf8'),{module:uiModule,wx:{showModal(o){o.success({confirm:true})},...wx},Date,Promise,getApp(){return {globalData:{}}}})
- vm.runInNewContext(fs.readFileSync(path.join(__dirname,`../pages/${name}/index.js`),'utf8'),{Page(d){definition=d},require(n){if(n.includes('ledger-view'))return uiModule.exports;if(n.includes('member-labels'))return require('../services/member-labels');return api},wx:{showToast(){},...wx},Date,Promise})
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../services/ledger-view.js'),'utf8'),{module:uiModule,wx:{showModal(o){o.success({confirm:true})},...wx},Date,Promise,require(n){return n==='./api'?api:require('../services/'+n)},getApp(){return {globalData:{}}}})
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,`../pages/${name}/index.js`),'utf8'),{Page(d){definition=d},require(n){if(n.includes('ledger-view'))return uiModule.exports;if(n.includes('member-labels'))return require('../services/member-labels');if(n.includes('offline-trips'))return {listCachedTrips:()=>[],rememberTrips(){}};return api},wx:{showToast(){},...wx},Date,Promise})
  return {...definition,data:JSON.parse(JSON.stringify(definition.data)),setData(c){Object.assign(this.data,c)}}
 }
 test('home authenticated list opens detail, not expense; refresh removes deleted trips',async()=>{
@@ -28,3 +28,22 @@ test('creation redirects to detail invitation guide even when optional dates fai
  p.setData({name:'东京',startDate:'2026-10-26'});await p.createTrip();assert.equal(calls,1);assert.match(url,/trip-detail/);assert.match(url,/inviteGuide=1/);assert.match(url,/dateFailed=1/)
 })
 module.exports={page}
+
+test('repeated creation reuses the created trip after a navigation failure',async()=>{
+ let calls=0,ids=[];
+ const p=page('trip-create',{listTrips:async()=>[],createTrip:async(n,c,id)=>{calls++;ids.push(id);return {id:'created',name:n,default_currency:c}}},{redirectTo(){}});
+ p.setData({name:'东京'});await p.createTrip();await p.createTrip();assert.equal(calls,1);assert.match(ids[0],/^[0-9a-f-]{36}$/);
+});
+
+test('an older home refresh cannot replace fresh balances used by sorting and filtering',async()=>{
+ let release,reads=0;
+ const p=page('trips',{listTrips:async()=>[{id:'debt',name:'札幌',member_count:2},{id:'paid',name:'东京',member_count:2},{id:'solo',name:'周末',member_count:1}],ledgerSummary:async()=>++reads===1?new Promise(r=>release=r):({trips:[{id:'debt',day_count:2,pending:[{currency:'CNY',amount:'1793.75',direction:'payable'}]},{id:'paid',day_count:1,pending:[]},{id:'solo',day_count:0}],groups:[]})},{setStorageSync(){}});
+ const old=p.loadTrips();await Promise.resolve();await p.loadTrips();release({compatibilityError:'old response',trips:[],groups:[]});await old;
+ p.applyPreferences('pending',true);
+ assert.equal(p.data.trips[0].id,'debt');assert.equal(p.data.trips[0].statusText,'¥1,793.75');assert.equal(p.data.trips.some(t=>t.id==='paid'),false);assert.equal(p.data.summaryUnavailable,false);
+});
+
+test('pending-first waits for balances instead of prioritizing unknown cached trips',async()=>{
+ let reads=0;const p=page('trips',{listTrips:async()=>[{id:'debt',name:'札幌',member_count:2},{id:'solo',name:'周末',member_count:1}],ledgerSummary:async()=>++reads===1?{compatibilityError:'not ready',trips:[],groups:[]}:{trips:[{id:'debt',day_count:1,pending:[{currency:'CNY',amount:'30'}]},{id:'solo'}],groups:[]}},{setStorageSync(){}});
+ await p.loadTrips();await p.chooseSort({currentTarget:{dataset:{sort:'pending'}}});assert.equal(reads,2);assert.equal(p.data.trips[0].id,'debt');assert.equal(p.data.trips[0].statusText,'¥30.00');
+});

@@ -1,12 +1,12 @@
 <view class="screen">
-  <view class="heading"><text class="muted block">新的旅程</text><text class="title">下一笔，记到哪段旅程？</text></view>
   <view class="card">
-    <text class="section-title block">新建旅行</text><text class="muted block intro">只创建一次，每天的消费自动归入日账单。</text>
-    <view class="field"><text class="field-label">旅行名称</text><input class="input" value="{{name}}" maxlength="120" placeholder="例如：东京周末" bindinput="onName"/></view>
+    <text class="section-title block">新的一段旅程</text><text class="muted block intro">名称之外都可以稍后再改。</text>
+    <view class="field"><text class="field-label">旅行名称（必填）</text><input class="input" value="{{name}}" maxlength="120" placeholder="例如：东京周末" bindinput="onName"/></view>
     <view class="field"><text class="field-label">出行日期（可选）</text><calendar-picker mode="range" start="{{startDate}}" end="{{endDate}}" bindselect="onDates"/><text class="muted block hint">用来判断进行中的旅行，可稍后补填</text></view>
-    <view class="field"><text class="field-label">结算币种</text><view class="input row" bindtap="openCurrency"><text>{{currency}}</text><text class="muted">⌄</text></view></view>
+    <view class="field"><text class="field-label">结算币种</text><view class="input row" bindtap="openCurrency"><text>{{currency==='CNY' ? '人民币 CNY' : currency}}</text><text class="muted">⌄</text></view></view>
+    <view class="invite-hint"><text class="section-title block">＋ 创建后邀请同行人</text><text class="block">发到微信聊天，对方点开就能加入</text></view>
     <text wx:if="{{error}}" class="error">{{error}}</text>
   </view>
-  <view class="bottom-bar"><button class="primary" loading="{{creating}}" disabled="{{creating}}" bindtap="createTrip">创建</button></view>
+  <view class="bottom-bar"><button class="primary" loading="{{creating}}" disabled="{{creating || !validName}}" bindtap="createTrip">创建并邀请同行人</button></view>
   <view wx:if="{{currencyOpen}}" class="sheet-cover" bindtap="closeCurrency"><view class="sheet" catchtap="stop"><text class="section-title block">结算币种</text><view wx:for="{{currencies}}" wx:key="*this" class="sheet-option row" data-currency="{{item}}" bindtap="chooseCurrency"><text>{{item}}</text><text wx:if="{{currency===item}}" class="link">✓</text></view></view></view>
 </view>
