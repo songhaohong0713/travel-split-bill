@@ -12,6 +12,7 @@ from app.core.business_time import (
     client_timezone_offset,  # noqa: F401 - compatibility re-export
 )
 from app.core.money import quantized_money
+from app.core.settlement import _minimum_transfers
 
 
 def snapshot_token(snapshot):
@@ -40,7 +41,6 @@ def _raw_project(snapshot):
         r["occurred_at"] for r in snapshot["expenses"]
     }
     dates |= {a["date"] for p in state["payments"] for a in p["allocations"]}
-    first = members[0]
     days = []
     for day in sorted(dates, reverse=True):
         records = [r for r in snapshot["expenses"] if r["occurred_at"] == day]
@@ -69,11 +69,7 @@ def _raw_project(snapshot):
                     expenses.append(parsed.to_expense(snapshot["currency"]))
             if expenses:
                 groups = _grouped_payload(tuple(members), tuple(expenses))["groups"]
-            for group in groups:
-                currency = group["currency"]
-                balances[currency] = Decimal(
-                    group["net_by_participant"][first]["amount"]
-                )
+            balances = _balances({"groups": groups})
         except (ValueError, ArithmeticError, TypeError, AttributeError):
             error = "消费分摊或汇率不完整，请打开消费修正"
         for payment in state["payments"]:
@@ -82,24 +78,12 @@ def _raw_project(snapshot):
             for allocation in payment["allocations"]:
                 if allocation["date"] == day:
                     currency = payment["currency"]
-                    balances[currency] = balances.get(currency, Decimal(0)) - Decimal(
-                        allocation["amount"]
-                    )
-        pending = []
-        for currency, balance in sorted(balances.items()):
-            if balance:
-                if len(members) != 2:
-                    error = "请等待同行人加入后结清"
-                    continue
-                pending.append(
-                    {
-                        "currency": currency,
-                        "amount": amount(currency, abs(balance)),
-                        "signed_amount": amount(currency, balance),
-                        "from_participant_id": members[1] if balance > 0 else first,
-                        "to_participant_id": first if balance > 0 else members[1],
-                    }
-                )
+                    net = balances.setdefault(currency, {})
+                    for member, value in _legacy_net(
+                        members, allocation["amount"]
+                    ).items():
+                        net[member] = net.get(member, Decimal(0)) - value
+        pending = _pending(balances, members)
         status = (
             "recording"
             if day not in state["closed_dates"]
@@ -132,6 +116,8 @@ def _raw_project(snapshot):
 
 
 def payment_preview(snapshot, requested_dates=None, *, ledger=None):
+    if len(snapshot["members"]) > 2:
+        raise ValueError("多人结清尚未开放")
     if (
         "timezone_offset_minutes" in snapshot
         and snapshot["timezone_offset_minutes"] is None
@@ -204,14 +190,38 @@ def _raw_days(snapshot, records=None):
 
 def _balances(day):
     return {
-        g["currency"]: Decimal(
-            g["net_by_participant"][min(g["net_by_participant"])]["amount"]
-        )
+        g["currency"]: {
+            member: Decimal(value["amount"])
+            for member, value in g["net_by_participant"].items()
+        }
         for g in day["groups"]
     }
 
 
+def _legacy_net(members, value):
+    # Stored signed x is the first sorted member's net, regardless of from/to.
+    signed = Decimal(value)
+    return dict(zip(members, (signed, -signed)))
+
+
+def _pending(balances, members):
+    pending = []
+    for currency, net in sorted(balances.items()):
+        for transfer in _minimum_transfers(net, currency):
+            row = {
+                "currency": currency,
+                "amount": transfer.amount.amount,
+                "from_participant_id": transfer.from_participant_id,
+                "to_participant_id": transfer.to_participant_id,
+            }
+            if len(members) == 2:
+                row["signed_amount"] = amount(currency, net[members[0]])
+            pending.append(row)
+    return pending
+
+
 def project(snapshot):
+    members = sorted(snapshot["members"])
     raw = _raw_days(snapshot)
     active = [p for p in snapshot["state"]["payments"] if not p.get("revoked_at")]
     frozen = {}
@@ -234,60 +244,70 @@ def project(snapshot):
                 )
         if "freeze_basis" in payment:
             for basis in payment["freeze_basis"]:
-                frozen[basis["date"], basis["currency"]] = Decimal(basis["amount"])
+                for member, value in _legacy_net(members, basis["amount"]).items():
+                    frozen[basis["date"], basis["currency"], member] = value
         else:
             basis = _raw_days(snapshot, payment.get("basis_expenses", []))
             for allocation in payment["allocations"]:
                 key = allocation["date"], payment["currency"]
                 original = _balances(basis.get(key[0], {"groups": []})).get(key[1])
-                if original is not None and original == Decimal(allocation["amount"]):
-                    frozen[key] = original
+                if original is not None and original == _legacy_net(
+                    members, allocation["amount"]
+                ):
+                    for member, value in original.items():
+                        frozen[*key, member] = value
     for day, currencies in known_currencies.items():
-        if currencies and all((day, c) in frozen for c in currencies):
+        if currencies and all(
+            (day, c, member) in frozen for c in currencies for member in members
+        ):
             for currency in _balances(raw.get(day, {"groups": []})):
-                frozen.setdefault((day, currency), Decimal(0))
+                for member in members:
+                    frozen.setdefault((day, currency, member), Decimal(0))
     dates = set(raw) | set(snapshot["state"]["closed_dates"])
     dates |= {
         a["date"] for p in snapshot["state"]["payments"] for a in p["allocations"]
     }
     balances = {d: _balances(raw.get(d, {"groups": []})) for d in dates}
-    carries = {d: [] for d in dates}
+    carries = {d: {} for d in dates}
     for payment in active:
         for allocation in payment["allocations"]:
             day, currency = allocation["date"], payment["currency"]
-            if (day, currency) not in frozen:
-                balances[day][currency] = balances[day].get(
-                    currency, Decimal(0)
-                ) - Decimal(allocation["amount"])
+            for member, value in _legacy_net(members, allocation["amount"]).items():
+                if (day, currency, member) not in frozen:
+                    net = balances[day].setdefault(currency, {})
+                    net[member] = net.get(member, Decimal(0)) - value
     today = trip_today(snapshot)
-    for day, currency in frozen:
-        balances.setdefault(day, {})[currency] = Decimal(0)
-    for (day, currency), original in sorted(frozen.items()):
-        current = _balances(raw.get(day, {"groups": []})).get(currency, Decimal(0))
+    for day, currency, member in frozen:
+        balances.setdefault(day, {}).setdefault(currency, {})[member] = Decimal(0)
+    for (day, currency, member), original in sorted(frozen.items()):
+        current = (
+            _balances(raw.get(day, {"groups": []}))
+            .get(currency, {})
+            .get(member, Decimal(0))
+        )
         delta = current - original
         if not delta:
             continue
         target = next(
-            (d for d in sorted(dates) if d > day and (d, currency) not in frozen),
+            (
+                d
+                for d in sorted(dates)
+                if d > day and (d, currency, member) not in frozen
+            ),
             (date.fromisoformat(day) + timedelta(days=1)).isoformat(),
         )
-        while (target, currency) in frozen:
+        while (target, currency, member) in frozen:
             target = (date.fromisoformat(target) + timedelta(days=1)).isoformat()
         dates.add(target)
-        balances.setdefault(target, {})[currency] = (
-            balances.get(target, {}).get(currency, Decimal(0)) + delta
-        )
-        carries.setdefault(target, []).append(
-            {
-                "kind": "adjustment",
-                "source_date": day,
-                "currency": currency,
-                "signed_amount": amount(currency, delta),
-                "amount": amount(currency, abs(delta)),
-            }
-        )
+        net = balances.setdefault(target, {}).setdefault(currency, {})
+        net[member] = net.get(member, Decimal(0)) + delta
+        carries.setdefault(target, {})[day, currency, member] = {
+            "participant_id": member,
+            "source_date": day,
+            "currency": currency,
+            "signed_amount": delta,
+        }
     days = []
-    members = sorted(snapshot["members"])
     for day in sorted(dates, reverse=True):
         row = deepcopy(
             raw.get(
@@ -308,25 +328,24 @@ def project(snapshot):
                         Decimal(0),
                     ),
                 ),
-                "signed_amount": amount(g["currency"], _balances(row)[g["currency"]]),
+                "signed_amount": amount(
+                    g["currency"], _balances(row)[g["currency"]][members[0]]
+                ),
             }
             for g in row["groups"]
         ]
-        row["carry_entries"] = carries.get(day, [])
-        row["pending"] = []
-        for currency, value in sorted(balances[day].items()):
-            if value and len(members) == 2:
-                row["pending"].append(
-                    {
-                        "currency": currency,
-                        "amount": amount(currency, abs(value)),
-                        "signed_amount": amount(currency, value),
-                        "from_participant_id": members[1] if value > 0 else members[0],
-                        "to_participant_id": members[0] if value > 0 else members[1],
-                    }
-                )
-            elif value:
-                row["error"] = "请等待同行人加入后结清"
+        row["carry_entries"] = [
+            {
+                "kind": "adjustment",
+                "source_date": entry["source_date"],
+                "currency": entry["currency"],
+                "signed_amount": amount(entry["currency"], entry["signed_amount"]),
+                "amount": amount(entry["currency"], abs(entry["signed_amount"])),
+            }
+            for entry in carries.get(day, {}).values()
+            if entry["participant_id"] == members[0]
+        ]
+        row["pending"] = _pending(balances[day], members)
         if (
             "timezone_offset_minutes" in snapshot
             and snapshot["timezone_offset_minutes"] is None
@@ -375,7 +394,9 @@ def settlement_basis(snapshot, preview, currency):
             "currency": currency,
             "amount": amount(
                 currency,
-                _balances(raw.get(d, {"groups": []})).get(currency, Decimal(0)),
+                _balances(raw.get(d, {"groups": []}))
+                .get(currency, {})
+                .get(min(snapshot["members"]), Decimal(0)),
             ),
         }
         for d in sorted(sources)
