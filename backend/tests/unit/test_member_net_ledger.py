@@ -140,3 +140,54 @@ def test_single_member_self_expense_has_no_pending_transfer():
     assert day["error"] == ""
     assert day["pending"] == []
     assert day["status"] == "settled"
+
+
+@pytest.mark.parametrize("new_member", ["0", "b", "z"])
+@pytest.mark.parametrize("basis_format", ["basis_expenses", "freeze_basis"])
+@pytest.mark.parametrize("payer,signed", [("a", "200.00"), ("c", "-200.00")])
+def test_joining_member_does_not_reassign_existing_settlement(
+    monkeypatch, new_member, basis_format, payer, signed
+):
+    from app.core import ledger
+
+    s = snapshot()
+    s["members"] = ["a", "c"]
+    bill = s["expenses"][0]["payload"]["expenses"][0]
+    bill["payer_id"] = payer
+    bill["items"][0]["allocation"] = {"a": "0.5", "c": "0.5"}
+    payment = {
+        "id": "settled-before-join",
+        "currency": "CNY",
+        "from_participant_id": "c" if payer == "a" else "a",
+        "to_participant_id": payer,
+        "allocations": [{"date": "2020-01-01", "amount": signed}],
+    }
+    if basis_format == "basis_expenses":
+        payment[basis_format] = deepcopy(s["expenses"])
+    else:
+        payment[basis_format] = [
+            {"date": "2020-01-01", "currency": "CNY", "amount": signed}
+        ]
+    s["state"]["payments"].append(payment)
+    before = project(s)
+    assert before["days"][0]["status"] == "settled"
+
+    nets = []
+    original_pending = ledger._pending
+
+    def capture_pending(balances, members):
+        nets.append(deepcopy(balances))
+        return original_pending(balances, members)
+
+    monkeypatch.setattr(ledger, "_pending", capture_pending)
+    s["members"].append(new_member)
+    after = project(s)
+
+    assert [d["date"] for d in after["days"]] == ["2020-01-01"]
+    assert after["days"][0]["status"] == "settled"
+    assert after["days"][0]["pending"] == []
+    assert after["days"][0]["carry_entries"] == []
+    assert nets[-1] == {
+        "CNY": {"a": Decimal(0), "c": Decimal(0), new_member: Decimal(0)}
+    }
+    assert after["payments"] == before["payments"]

@@ -80,7 +80,7 @@ def _raw_project(snapshot):
                     currency = payment["currency"]
                     net = balances.setdefault(currency, {})
                     for member, value in _legacy_net(
-                        members, allocation["amount"]
+                        members, allocation["amount"], payment
                     ).items():
                         net[member] = net.get(member, Decimal(0)) - value
         pending = _pending(balances, members)
@@ -198,10 +198,18 @@ def _balances(day):
     }
 
 
-def _legacy_net(members, value):
-    # Stored signed x is the first sorted member's net, regardless of from/to.
+def _legacy_net(members, value, payment):
+    # Signed x belongs to the first sorted participant of this payment's pair.
+    # Handwritten legacy fixtures without endpoints retain the old fallback.
+    pair = (
+        sorted((payment["from_participant_id"], payment["to_participant_id"]))
+        if "from_participant_id" in payment and "to_participant_id" in payment
+        else members[:2]
+    )
     signed = Decimal(value)
-    return dict(zip(members, (signed, -signed)))
+    net = dict.fromkeys(members, Decimal(0))
+    net.update(zip(pair, (signed, -signed)))
+    return net
 
 
 def _pending(balances, members):
@@ -244,7 +252,9 @@ def project(snapshot):
                 )
         if "freeze_basis" in payment:
             for basis in payment["freeze_basis"]:
-                for member, value in _legacy_net(members, basis["amount"]).items():
+                for member, value in _legacy_net(
+                    members, basis["amount"], payment
+                ).items():
                     frozen[basis["date"], basis["currency"], member] = value
         else:
             basis = _raw_days(snapshot, payment.get("basis_expenses", []))
@@ -252,7 +262,7 @@ def project(snapshot):
                 key = allocation["date"], payment["currency"]
                 original = _balances(basis.get(key[0], {"groups": []})).get(key[1])
                 if original is not None and original == _legacy_net(
-                    members, allocation["amount"]
+                    members, allocation["amount"], payment
                 ):
                     for member, value in original.items():
                         frozen[*key, member] = value
@@ -272,7 +282,9 @@ def project(snapshot):
     for payment in active:
         for allocation in payment["allocations"]:
             day, currency = allocation["date"], payment["currency"]
-            for member, value in _legacy_net(members, allocation["amount"]).items():
+            for member, value in _legacy_net(
+                members, allocation["amount"], payment
+            ).items():
                 if (day, currency, member) not in frozen:
                     net = balances[day].setdefault(currency, {})
                     net[member] = net.get(member, Decimal(0)) - value
