@@ -31,6 +31,12 @@ class CloudBasePgClient:
         self.base_url = f"https://{env_id}.api.tcloudbasegateway.com/v1/rdb/rest"
         self._api_key = api_key
         self._client = client
+        self._owns_client = client is None
+
+    async def aclose(self):
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     @classmethod
     def from_environment(cls) -> "CloudBasePgClient":
@@ -51,8 +57,9 @@ class CloudBasePgClient:
         payload: object | None = None,
     ) -> object:
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        owns_client = self._client is None
-        client = self._client or httpx.AsyncClient(timeout=10.0)
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=10.0)
+        client = self._client
         try:
             response = await client.request(
                 method,
@@ -63,11 +70,10 @@ class CloudBasePgClient:
             )
         except httpx.HTTPError as exc:
             raise CloudBasePgUnavailable("CloudBase PostgreSQL request failed") from exc
-        finally:
-            if owns_client:
-                await client.aclose()
         if response.status_code in {401, 403}:
-            raise CloudBasePgConfigurationError("CloudBase PostgreSQL authorization failed")
+            raise CloudBasePgConfigurationError(
+                "CloudBase PostgreSQL authorization failed"
+            )
         if response.status_code >= 500:
             raise CloudBasePgUnavailable("CloudBase PostgreSQL is unavailable")
         if response.is_error:

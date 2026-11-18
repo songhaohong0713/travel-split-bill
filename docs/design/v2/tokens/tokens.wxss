@@ -1,0 +1,66 @@
+/* 旅账 v2 设计 token —— 由 tokens.json 生成。1px(设计稿) = 2rpx */
+page {
+  --bg-page: #F6F4F0;
+  --bg-surface: #FFFFFF;
+  --bg-subtle: #ECE8E1;
+  --bg-disabled: #E3DFD7;
+  --border-divider: #E4DFD6;
+  --text-primary: #1A1A17;
+  --text-secondary: #6B6A64;
+  --text-placeholder: #8F8C84;
+  --brand-green: #2F5D4E;
+  --brand-green-subtle: #E8EFEB;
+  --brand-green-border: #C9DCD3;
+  --status-pending: #8A5208;
+  --status-pending-bg: #FBEBD3;
+  --status-danger: #A3442E;
+  --status-danger-bg: #F6E5E0;
+  --radius-page-card: 48rpx;
+  --radius-list-card: 40rpx;
+  --radius-transfer-row: 36rpx;
+  --radius-button-l: 32rpx;
+  --radius-input: 28rpx;
+  --radius-button-s: 24rpx;
+  --radius-tag: 20rpx;
+  --radius-pill: 999rpx;
+  --space-page-x: 48rpx;
+  --space-page-top: 24rpx;
+  --space-section-gap: 32rpx;
+  --space-form-section-gap: 28rpx;
+  --space-card-pad: 40rpx;
+  --space-list-card-pad: 36rpx;
+  --space-label-gap: 12rpx;
+  --space-list-end-gap: 56rpx;
+  --size-button-l-h: 108rpx;
+  --size-button-s-h: 88rpx;
+  --size-input-h: 96rpx;
+  --size-date-chip-h: 72rpx;
+  --size-segmented-h: 80rpx;
+  --size-tile: 88rpx;
+  --size-avatar-l: 72rpx;
+  --size-avatar-s: 56rpx;
+  --size-switch-w: 88rpx;
+  --size-switch-h: 52rpx;
+  --font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+}
+
+.t-amount-xl { font-size: 96rpx; line-height: 134rpx; font-weight: 700; }
+.t-amount-l { font-size: 88rpx; line-height: 124rpx; font-weight: 700; }
+.t-amount-m { font-size: 72rpx; line-height: 100rpx; font-weight: 700; }
+.t-title-page { font-size: 56rpx; line-height: 78rpx; font-weight: 700; }
+.t-amount-s { font-size: 44rpx; line-height: 62rpx; font-weight: 700; }
+.t-title-card { font-size: 34rpx; line-height: 48rpx; font-weight: 700; }
+.t-nav-title { font-size: 34rpx; line-height: 48rpx; font-weight: 500; }
+.t-body-l { font-size: 32rpx; line-height: 44rpx; font-weight: 500; }
+.t-body { font-size: 30rpx; line-height: 44rpx; font-weight: 400; }
+.t-body-s { font-size: 28rpx; line-height: 40rpx; font-weight: 400; }
+.t-caption { font-size: 26rpx; line-height: 36rpx; font-weight: 400; }
+.t-caption-s { font-size: 24rpx; line-height: 34rpx; font-weight: 400; }
+.t-micro { font-size: 22rpx; line-height: 30rpx; font-weight: 500; }
+
+.num { font-variant-numeric: tabular-nums; }
+.bottom-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 28rpx 48rpx; padding-bottom: max(28rpx, env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, rgba(246,244,240,0) 0%, #F6F4F0 22%, #F6F4F0 100%); }

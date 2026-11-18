@@ -9,7 +9,8 @@ function loadApi(calls, wxOverrides = {}) {
   const module = { exports: {} }
   vm.runInNewContext(source, {
     getApp() { return { globalData: { apiBaseUrl: "https://example.test" } } },
-    wx: { getStorageSync() { return "token" }, request(options) { calls.push(options); options.success({ statusCode: 200, data: { data: { id: "trip-1" } } }) }, ...wxOverrides },
+    wx: { getStorageSync() { return "token" }, request(options) { calls.push(options); options.success({ statusCode: 200, data: { data: { id: "trip-1", already_member:false } } }) }, ...wxOverrides },
+    require(name) { return {isLocalTrip:()=>false} },
     module, exports: module.exports, Promise,
   })
   return module.exports
@@ -53,7 +54,7 @@ test("a cold invite login is shared by preview and accept", async () => {
     request(options) {
       calls.push(options)
       if (options.url.endsWith("/v1/auth/wechat")) return options.success({ statusCode: 200, data: { data: { access_token: "fresh-access", refresh_token: "fresh-refresh" } } })
-      options.success({ statusCode: 200, data: { data: { id: "trip-1" } } })
+      options.success({ statusCode: 200, data: { data: { id: "trip-1", already_member:false } } })
     },
   })
 
@@ -76,7 +77,7 @@ test("an expired access token refreshes and retries a protected request once", a
       calls.push(options)
       if (options.url.endsWith("/v1/auth/refresh")) return options.success({ statusCode: 200, data: { data: { access_token: "fresh", refresh_token: "rotated" } } })
       if (options.header.Authorization === "Bearer expired") return options.success({ statusCode: 401, data: { error: { code: "HTTP_ERROR", message: "invalid access token" } } })
-      options.success({ statusCode: 200, data: { data: { id: "trip-1" } } })
+      options.success({ statusCode: 200, data: { data: { id: "trip-1", already_member:false } } })
     },
   })
 
@@ -116,3 +117,15 @@ test("invite page continues loading the original invite after cold-start login",
   assert.equal(page.data.invite.name, "东京旅行")
   assert.equal(page.data.loading, false)
 })
+
+test('legacy invitation checks real membership before offering join',async()=>{
+ const calls=[];const api=loadApi(calls,{request(o){calls.push(o);o.success({statusCode:200,data:{data:o.url.endsWith('/v1/trips')?[{id:'own'}]:{trip_id:'own',name:'东京'}}})}});
+ assert.equal((await api.getTripInvite('mine')).already_member,true);
+ assert.equal(calls.filter(c=>c.method==='POST').length,0);
+});
+
+test('v2 expenses cannot be silently calculated by a legacy backend',async()=>{
+ const calls=[];const api=loadApi(calls,{request(o){calls.push(o);o.success(o.url.endsWith('/v1/capabilities')?{statusCode:404,data:{error:{message:'Not Found'}}}:{statusCode:201,data:{data:{id:'should-not-create'}}})}});
+ await assert.rejects(api.createExpense('t','2026-10-28',{expenses:[{calculation_version:'v2'}]}),e=>/更新/.test(e.message));
+ assert.equal(calls.filter(o=>o.method==='POST').length,0);
+});

@@ -1,0 +1,38 @@
+# Figma 结构大纲 · v2 · 02a 首页（空状态）（node 2004:67）
+# 格式说明见 01-home.txt
+
+v2 · 02a 首页（空状态） 375x812 col gap0 bg=bg/page
+  Nav 375x44
+    "我的旅行" 17/Medium text/primary
+  Body 375x484 col gap16 pad(12 24 0 24)
+    Frame 327x63 col gap4
+      "下午好" 14/Regular text/secondary
+      "从第一段旅程开始" 28/Bold text/primary
+    Create Card 327x393 col gap16 pad(20 20 20 20) bg=bg/surface r24
+      Frame 287x46 col gap4
+        "还没有旅行账单" 17/Bold text/primary
+        "创建后就能拍小票记账，和同行人按天结算。" 13/Regular text/secondary
+      Frame 287x71 col gap6
+        "旅行名称（必填）" 12/Medium text/secondary
+        Input 287x48 row pad(13 16 13 16) main=space_between cross=center bg=bg/page r14
+          "例如：东京周末" 15/Regular text/placeholder
+      Date Range Field 287x94 col gap6
+        "出行日期（可选）" 12/Medium text/secondary
+        Date Range 287x48 row gap8 cross=center
+          Input 131x48 row pad(13 14 13 14) main=space_between cross=center bg=bg/page r14
+            "开始日期" 15/Regular text/placeholder
+            icon/calendar 16x16
+          "–" 16/Regular text/secondary
+          Input 131x48 row pad(13 14 13 14) main=space_between cross=center bg=bg/page r14
+            "结束日期" 15/Regular text/placeholder
+            icon/calendar 16x16
+        "用来判断进行中的旅行，可稍后补填" 12/Regular text/secondary
+      Frame 287x94 col gap6
+        "结算币种" 12/Medium text/secondary
+        Input 287x48 row pad(13 16 13 16) main=space_between cross=center bg=bg/page r14
+          "人民币 CNY" 15/Regular text/primary
+          icon/chevron-down 16x16
+        "最终按人民币结算，日元等外币消费会自动换算" 12/Regular text/secondary
+  Bottom Bar 375x102 col pad(14 24 34 24) absolute@(0,710) bg=gradient_linear
+    Primary Button（禁用态） 327x54 row pad(16 0 16 0) main=center cross=center bg=bg/disabled r16
+      "创建旅行" 16/Medium text/placeholder

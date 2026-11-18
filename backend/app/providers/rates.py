@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import httpx
+from app.core.business_time import business_today
 from app.core.money import currency_scale
 
 
@@ -19,7 +20,8 @@ class FrankfurterRates:
     async def quote(self, day: date, source: str, target: str) -> dict[str, str]:
         currency_scale(source)
         currency_scale(target)
-        if day > datetime.now(UTC).date():
+        now = datetime.now(UTC)
+        if day > date.fromisoformat(business_today(now)):
             raise RateUnavailable("不能查询未来的汇率")
         if source == target:
             return {
@@ -33,7 +35,9 @@ class FrankfurterRates:
         try:
             response = await self.client.get(
                 f"https://api.frankfurter.dev/v2/rate/{source}/{target}",
-                params={"date": day.isoformat()},
+                # Local midnight may precede UTC midnight. Use the most recent
+                # published date, retaining the user's requested date below.
+                params={"date": min(day, now.date()).isoformat()},
                 timeout=10,
             )
             response.raise_for_status()

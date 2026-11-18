@@ -1,0 +1,21 @@
+# Figma 结构大纲 · v2 · 04b 当天结算（已结清）（node 2004:342）
+# 与 04a 结构相同，只列出差异。格式说明见 01-home.txt
+
+v2 · 04b 当天结算（已结清） 375x916 col pad(0 0 34 0) bg=bg/page   ← 无底部固定按钮
+  Body col gap16 pad(12 24 24 24)
+    标题区：Status Chip 63x30 pad(6 12 6 12) bg=brand/green-subtle r999
+      "已结清" 13/Medium brand/green
+    转账 Card 327x220 col gap14 pad(20 20 20 20) bg=bg/surface r24
+      Frame row main=space_between："收款" 17/Bold / "共 1 笔" 12/Regular text/secondary
+      Transfer Row 287x78 row pad(16 16 16 16) main=space_between cross=center bg=brand/green-subtle r18
+        "周" → "我" 头像（同 04a）
+        "¥235.97" 22/Bold brand/green
+        "人民币" 11/Regular text/secondary
+      "小周付给你 · 按 1 JPY = 0.04236 CNY 换算" 13/Regular text/secondary
+      Frame 287x18 row main=space_between cross=center
+        Frame row gap6 cross=center
+          icon/check 16x16（brand/green）
+          "小周 10月7日 18:32 已付款 · 你已确认" 13/Medium brand/green
+        "撤销" 13/Medium status/danger 下划线   ← 点击后二次确认，确认后回到 04a 状态
+    分摊明细 Card：同 04a
+    当天消费 Card：同 04a

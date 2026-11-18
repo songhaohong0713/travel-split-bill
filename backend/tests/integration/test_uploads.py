@@ -9,6 +9,7 @@ from app.db.session import configure_database, create_schema, drop_schema
 from app.main import app
 from app.providers.deepseek_receipt_ai import DeepSeekReceiptAiError
 from fastapi.testclient import TestClient
+from test_receipt_originals import MemoryStorage, jpeg
 
 
 class FakeReceiptAi:
@@ -34,9 +35,11 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
     configure_database(f"sqlite+pysqlite:///{tmp_path / 'uploads.db'}")
     create_schema()
     app.state.receipt_ai = FakeReceiptAi()
+    app.state.receipt_storage = MemoryStorage()
     with TestClient(app) as test_client:
         yield test_client
     delattr(app.state, "receipt_ai")
+    delattr(app.state, "receipt_storage")
     drop_schema()
 
 
@@ -48,7 +51,7 @@ def test_receipt_job_processes_jpeg_without_creating_expense(client: TestClient)
         '/v1/receipt-jobs',
         headers=headers,
         data={'trip_id': trip['id']},
-        files={'file': ('receipt.jpg', b'jpeg', 'image/jpeg')},
+        files={'file': ('receipt.jpg', jpeg(), 'image/jpeg')},
     )
 
     assert response.status_code == 202
@@ -70,14 +73,14 @@ def test_receipt_job_logs_safe_recognition_metadata(client: TestClient, caplog: 
         "/v1/receipt-jobs",
         headers=headers,
         data={"trip_id": trip["id"]},
-        files={"file": ("receipt.jpg", b"jpeg", "image/jpeg")},
+        files={"file": ("receipt.jpg", jpeg(), "image/jpeg")},
     )
 
     assert "status=needs_review attempts=1 candidates=1" in caplog.text
     assert "お茶" not in caplog.text
 
 
-def test_receipt_job_rejects_non_jpeg(client: TestClient) -> None:
+def test_receipt_job_rejects_invalid_image_bytes(client: TestClient) -> None:
     headers = {"Authorization": f"Bearer {create_access_token('owner')}"}
     trip = client.post('/v1/trips', headers=headers, json={'name': '东京', 'default_currency': 'JPY'}).json()['data']
 

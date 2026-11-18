@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 
 import httpx
 import pytest
@@ -33,6 +33,53 @@ def test_rate_failure_is_explicit():
     )
     with pytest.raises(RateUnavailable):
         asyncio.run(FrankfurterRates(client).quote(date(2026, 8, 15), "JPY", "CNY"))
+
+
+def test_local_today_after_midnight_uses_latest_published_utc_quote(monkeypatch):
+    from app.core.ledger import client_timezone_offset
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 29, 15, 30, tzinfo=UTC)
+
+    monkeypatch.setattr('app.providers.rates.datetime', Clock)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert request.url.params['date'] == '2026-10-29'
+        return httpx.Response(200, json={'date': '2026-10-29', 'base': 'JPY', 'quote': 'CNY', 'rate': '0.042188'})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    token = client_timezone_offset.set(-540)
+    try:
+        result = asyncio.run(FrankfurterRates(client).quote(date(2026, 10, 30), 'JPY', 'CNY'))
+        assert result['requested_date'] == '2026-10-30'
+        assert result['effective_date'] == '2026-10-29'
+        with pytest.raises(RateUnavailable, match='未来'):
+            asyncio.run(FrankfurterRates(client).quote(date(2026, 10, 31), 'JPY', 'CNY'))
+        assert len(requests) == 1
+    finally:
+        client_timezone_offset.reset(token)
+
+
+def test_rate_future_guard_uses_local_date_west_of_utc(monkeypatch):
+    from app.core.ledger import client_timezone_offset
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 30, 1, 30, tzinfo=UTC)
+
+    monkeypatch.setattr('app.providers.rates.datetime', Clock)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: pytest.fail('future quote must not call upstream')))
+    token = client_timezone_offset.set(420)
+    try:
+        with pytest.raises(RateUnavailable, match='未来'):
+            asyncio.run(FrankfurterRates(client).quote(date(2026, 10, 30), 'JPY', 'CNY'))
+    finally:
+        client_timezone_offset.reset(token)
 
 
 def test_receipt_candidate_parser_does_not_treat_total_or_tax_as_product():

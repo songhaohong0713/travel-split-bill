@@ -21,3 +21,6 @@ dist/
 # Isolated Git worktrees
 .worktrees/
 *.egg-info/
+
+# Business backups and generated restore scripts contain private records
+/backups/

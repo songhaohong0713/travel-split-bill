@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 from typing import Any
 
 import httpx
@@ -47,7 +48,8 @@ class DeepSeekReceiptAi:
                             "text": (
                                 "Read this Japanese or English receipt. Translate item names into Chinese. "
                                 "Return only JSON in this exact shape: "
-                                '{"items":[{"source_text":"","translated_text":"","amount":"","currency":""}]}. '
+                                '{"merchant":"","occurred_at":"YYYY-MM-DD","items":[{"source_text":"","translated_text":"","amount":"","currency":""}]}. '
+                                'Use empty merchant/date when not readable; never invent a date or year. '
                                 "Include only purchased item lines. amount must be the positive line total used for "
                                 "settlement; when quantity and unit price are present, calculate their line total. "
                                 "Exclude receipt totals, tax, service fees, discounts, refunds, and payment rows. "
@@ -97,7 +99,8 @@ def parse_receipt_candidates(content: Any) -> list[dict[str, str]]:
     if not isinstance(content, str):
         raise DeepSeekReceiptAiError("DeepSeek returned non-text content")
     try:
-        items = json.loads(content).get("items")
+        receipt = json.loads(content)
+        items = receipt.get("items")
     except (AttributeError, json.JSONDecodeError) as exc:
         raise DeepSeekReceiptAiError("DeepSeek returned invalid receipt JSON") from exc
     if not isinstance(items, list):
@@ -122,4 +125,15 @@ def parse_receipt_candidates(content: Any) -> list[dict[str, str]]:
         )
     if not candidates:
         raise DeepSeekReceiptAiError("DeepSeek found no valid receipt items")
+    metadata = {}
+    merchant = str(receipt.get('merchant') or '').strip()[:120]
+    if merchant:
+        metadata['merchant'] = merchant
+    try:
+        metadata['occurred_at'] = date.fromisoformat(str(receipt.get('occurred_at') or '')).isoformat()
+    except ValueError:
+        pass
+    # Keep the established candidates contract compatible with existing jobs.
+    if metadata:
+        candidates[0].update(metadata)
     return candidates

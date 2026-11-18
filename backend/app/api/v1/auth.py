@@ -28,6 +28,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
+def validate_auth_configuration(environment=None):
+    values = os.environ if environment is None else environment
+    if values.get("APP_ENV", "").lower() in {"prod", "production"}:
+        secret = values.get("JWT_SECRET", "")
+        if len(secret) < 32 or secret == "development-only-secret-key-not-prod-32":
+            raise RuntimeError(
+                "Production requires a private JWT_SECRET of at least 32 characters"
+            )
+
+
 class WechatLoginRequest(BaseModel):
     code: str = Field(min_length=1, max_length=512)
 
@@ -67,7 +77,10 @@ def _new_refresh_token() -> str:
 
 
 def _tokens(user_id: str, refresh_token: str) -> dict[str, str]:
-    return {"access_token": create_access_token(user_id), "refresh_token": refresh_token}
+    return {
+        "access_token": create_access_token(user_id),
+        "refresh_token": refresh_token,
+    }
 
 
 def _issue_tokens(session: Any, user_id: str) -> dict[str, str]:
@@ -85,7 +98,10 @@ def _issue_tokens(session: Any, user_id: str) -> dict[str, str]:
 def _cloudbase_error(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail={"code": "DATABASE_UNAVAILABLE", "message": "CloudBase PostgreSQL is unavailable"},
+        detail={
+            "code": "DATABASE_UNAVAILABLE",
+            "message": "CloudBase PostgreSQL is unavailable",
+        },
     )
 
 
@@ -111,7 +127,9 @@ async def wechat_login(
             },
         ) from exc
 
-    cloudbase: CloudBasePgClient | None = getattr(request.app.state, "cloudbase_pg", None)
+    cloudbase: CloudBasePgClient | None = getattr(
+        request.app.state, "cloudbase_pg", None
+    )
     openid_hash = _hash(openid)
     if cloudbase is not None:
         refresh_token = _new_refresh_token()
@@ -136,7 +154,9 @@ async def wechat_login(
 
     # Local test fallback. Production configures ``cloudbase_pg`` during lifespan.
     with SessionLocal() as session:
-        user = session.scalar(select(User).where(User.wechat_openid_hash == openid_hash))
+        user = session.scalar(
+            select(User).where(User.wechat_openid_hash == openid_hash)
+        )
         if user is None:
             user = User(id=secrets.token_urlsafe(18), wechat_openid_hash=openid_hash)
             session.add(user)
@@ -148,7 +168,9 @@ async def wechat_login(
 
 @router.post("/refresh")
 async def refresh(body: RefreshRequest, request: Request) -> dict[str, dict[str, str]]:
-    cloudbase: CloudBasePgClient | None = getattr(request.app.state, "cloudbase_pg", None)
+    cloudbase: CloudBasePgClient | None = getattr(
+        request.app.state, "cloudbase_pg", None
+    )
     if cloudbase is not None:
         refresh_token = _new_refresh_token()
         try:
@@ -164,7 +186,11 @@ async def refresh(body: RefreshRequest, request: Request) -> dict[str, dict[str,
         except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
             raise _cloudbase_error(exc) from exc
         user_id = result.get("user_id") if isinstance(result, dict) else None
-        if not isinstance(result, dict) or not result.get("valid") or not isinstance(user_id, str):
+        if (
+            not isinstance(result, dict)
+            or not result.get("valid")
+            or not isinstance(user_id, str)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token"
             )
@@ -177,7 +203,11 @@ async def refresh(body: RefreshRequest, request: Request) -> dict[str, dict[str,
                 RefreshToken.token_hash == _hash(body.refresh_token)
             )
         )
-        if record is None or record.revoked_at is not None or record.expires_at <= _now():
+        if (
+            record is None
+            or record.revoked_at is not None
+            or record.expires_at <= _now()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid refresh token"
             )
