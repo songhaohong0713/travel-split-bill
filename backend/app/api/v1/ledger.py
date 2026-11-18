@@ -1,3 +1,4 @@
+import logging
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -15,11 +16,21 @@ from app.api.v1.trips import (
     require_trip_member,
 )
 from app.core.ledger import (
+    FORMAT_VERSION,
     amount,
+    annotate_transfers,
     basis_currencies,
+    drop_broken_plans,
+    find_transfer,
+    fix_plans,
+    member_settlement,
     payment_preview,
+    plan_id,
     project,
+    same_pair,
+    same_transfer,
     settlement_basis,
+    settlement_scope,
     snapshot_token,
     trip_today,
 )
@@ -32,6 +43,7 @@ from app.providers.cloudbase_pg import (
     CloudBasePgUnavailable,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/trips", tags=["ledger"])
 
 
@@ -60,52 +72,18 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
     totals: dict[str, dict[str, Decimal]] = {}
     summaries = []
     for trip_id, old in snapshots:
-        ledger = project(old)
-        closed = [day for day in ledger["days"] if day["status"] != "recording"]
-        pending = []
-        if closed and all(day["status"] != "invalid" for day in closed):
-            pending = payment_preview(old, ledger=ledger)["groups"]
-        pending = [
-            {
-                **group,
-                "direction": "receivable"
-                if group["to_participant_id"] == user_id
-                else "payable",
-            }
-            for group in pending
-        ]
-        for group in pending:
-            currency = group["currency"]
+        try:
+            summary = trip_summary(trip_id, old, user_id)
+        except Exception:  # One broken trip must not hide the rest.
+            logger.exception("ledger summary failed for trip %s", trip_id)
+            summary = {**EMPTY_SUMMARY, "id": trip_id}
+        for transfer in summary["pending"]:
             total = totals.setdefault(
-                currency, {"receivable": Decimal(0), "payable": Decimal(0)}
+                transfer["currency"],
+                {"receivable": Decimal(0), "payable": Decimal(0)},
             )
-            key = "receivable" if group["to_participant_id"] == user_id else "payable"
-            total[key] += Decimal(group["amount"])
-        summaries.append(
-            {
-                "id": trip_id,
-                "pending": pending,
-                "incomplete": any(day["error"] for day in ledger["days"]),
-                "pending_days": sum(day["status"] == "pending" for day in closed),
-                "day_count": len({r["occurred_at"] for r in old["expenses"]}),
-                "expense_count": len(old["expenses"]),
-                "latest_expense_date": max(
-                    (r["occurred_at"] for r in old["expenses"]), default=None
-                ),
-                "settled_at": max(
-                    (
-                        p["created_at"]
-                        for p in ledger["payments"]
-                        if not p.get("revoked_at")
-                    ),
-                    default=None,
-                ),
-                "has_recording": any(
-                    d["status"] == "recording" for d in ledger["days"]
-                ),
-                "history_status": ledger["history_status"],
-            }
-        )
+            total[transfer["direction"]] += Decimal(transfer["amount"])
+        summaries.append(summary)
     return {
         "data": {
             "contract_version": 2,
@@ -118,6 +96,55 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
                 for currency, values in sorted(totals.items())
             ],
         }
+    }
+
+
+EMPTY_SUMMARY = {
+    "pending": [],
+    "incomplete": True,
+    "pending_days": 0,
+    "day_count": 0,
+    "expense_count": 0,
+    "latest_expense_date": None,
+    "settled_at": None,
+    "has_recording": False,
+    "history_status": "not_required",
+}
+
+
+def trip_summary(trip_id, old, user_id):
+    ledger = project(old)
+    closed = [day for day in ledger["days"] if day["status"] != "recording"]
+    transfers = []
+    if closed and all(day["status"] != "invalid" for day in closed):
+        transfers = payment_preview(old, ledger=ledger)["transfers"]
+    return {
+        "id": trip_id,
+        # Transfers between other members are not this user's money.
+        "pending": [
+            {
+                **transfer,
+                "direction": "receivable"
+                if transfer["to_participant_id"] == user_id
+                else "payable",
+            }
+            for transfer in transfers
+            if user_id
+            in (transfer["from_participant_id"], transfer["to_participant_id"])
+        ],
+        "incomplete": any(day["error"] for day in ledger["days"]),
+        "pending_days": sum(day["status"] == "pending" for day in closed),
+        "day_count": len({r["occurred_at"] for r in old["expenses"]}),
+        "expense_count": len(old["expenses"]),
+        "latest_expense_date": max(
+            (r["occurred_at"] for r in old["expenses"]), default=None
+        ),
+        "settled_at": max(
+            (p["created_at"] for p in ledger["payments"] if not p.get("revoked_at")),
+            default=None,
+        ),
+        "has_recording": any(d["status"] == "recording" for d in ledger["days"]),
+        "history_status": ledger["history_status"],
     }
 
 
@@ -139,6 +166,9 @@ class PaymentRequest(Scope):
     mark_id: str | None = None
     token: str = Field(min_length=64, max_length=64)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
+    # Which transfer of the proposal; may be omitted while a trip has two members.
+    from_participant_id: str | None = Field(default=None, min_length=1, max_length=36)
+    to_participant_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 async def snapshot(trip_id, request, session, user_id):
@@ -176,7 +206,7 @@ async def snapshot(trip_id, request, session, user_id):
         "revision": ledger.revision if ledger else 0,
         "state": deepcopy(ledger.state_json)
         if ledger
-        else {"closed_dates": [], "payments": []},
+        else {"payments": []},
         "expenses": [
             {
                 "id": r.id,
@@ -246,12 +276,9 @@ async def get_ledger(
     result["currency"] = old["currency"]
     result["timezone_offset_minutes"] = old.get("timezone_offset_minutes")
     result["business_today"] = trip_today(old)
-    result["payer_marks"] = [
-        {**m, "stale": m.get("basis_token") != mark_basis_token(old)}
-        for m in result["payer_marks"]
-    ]
+    annotate_transfers(old, result)
     try:
-        result["summary"] = payment_preview(old, ledger=result)["groups"]
+        result["summary"] = payment_preview(old, ledger=result)["transfers"]
     except ValueError as exc:
         result["summary"] = []
         if any(d["status"] in ("pending", "invalid") for d in result["days"]):
@@ -260,7 +287,7 @@ async def get_ledger(
     totals: dict[str, Decimal] = {}
     for record in old["expenses"]:
         day = project(
-            {**old, "expenses": [record], "state": {"closed_dates": [], "payments": []}}
+            {**old, "expenses": [record], "state": {"payments": []}}
         )["days"][0]
         result["expense_summaries"].append(
             {"id": record["id"], "groups": day["groups"], "error": day["error"]}
@@ -277,33 +304,6 @@ async def get_ledger(
     ]
     result["summary_incomplete"] = any(d["status"] == "invalid" for d in result["days"])
     return {"data": result}
-
-
-@router.post("/{trip_id}/days/{day}/close")
-async def close_day(
-    trip_id: str, day: date, request: Request, session: DbSession, user_id: CurrentUser
-):
-    old = await snapshot(trip_id, request, session, user_id)
-    state = deepcopy(old["state"])
-    value = day.isoformat()
-    if value >= trip_today(old):
-        raise HTTPException(
-            422, detail={"code": "DAY_RECORDING", "message": "今天仍在记录中，不能结清"}
-        )
-    if value not in {r["occurred_at"] for r in old["expenses"]} and not any(
-        d["date"] == value and d["carry_entries"] for d in project(old)["days"]
-    ):
-        raise HTTPException(
-            422, detail={"code": "EMPTY_DAY", "message": "当天没有消费记录"}
-        )
-    if value not in state["closed_dates"]:
-        state["closed_dates"].append(value)
-        state.setdefault("closed_by", {})[value] = {
-            "user_id": user_id,
-            "at": datetime.now(UTC).isoformat(),
-        }
-        await persist(trip_id, request, session, user_id, old, state)
-    return {"data": {"date": value, "closed": True}}
 
 
 @router.post("/{trip_id}/payments/preview")
@@ -328,6 +328,32 @@ async def preview_payment(
         ) from exc
 
 
+def requested_transfer(old, body):
+    """The proposal for the requested range and the one transfer being acted on."""
+    if snapshot_token(old) != body.token:
+        raise conflict()
+    pair = (body.from_participant_id, body.to_participant_id)
+    if (pair[0] is None) != (pair[1] is None) or (
+        pair[0] is None and len(old["members"]) > 2
+    ):
+        raise HTTPException(
+            422,
+            detail={
+                "code": "TRANSFER_PAIR_REQUIRED",
+                "message": "请指明这笔转账的付款方和收款方",
+            },
+        )
+    try:
+        scope = settlement_scope(
+            old, [d.isoformat() for d in body.dates] if body.dates is not None else None
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            422, detail={"code": "INVALID_SETTLEMENT_SCOPE", "message": str(exc)}
+        ) from exc
+    return scope, find_transfer(scope, body.currency, *pair)
+
+
 @router.post("/{trip_id}/payments", status_code=201)
 async def mark_payment(
     trip_id: str,
@@ -337,22 +363,12 @@ async def mark_payment(
     user_id: CurrentUser,
 ):
     old = await snapshot(trip_id, request, session, user_id)
-    if snapshot_token(old) != body.token:
-        raise conflict()
-    try:
-        p = payment_preview(
-            old, [d.isoformat() for d in body.dates] if body.dates is not None else None
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            422, detail={"code": "INVALID_SETTLEMENT_SCOPE", "message": str(exc)}
-        ) from exc
-    group = next((g for g in p["groups"] if g["currency"] == body.currency), None)
+    p, group = requested_transfer(old, body)
     if group is None:
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
         )
-    if not group["offset_only"] and group["to_participant_id"] != user_id:
+    if not group.get("offset_only") and group["to_participant_id"] != user_id:
         raise HTTPException(
             403,
             detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认已收款"},
@@ -367,36 +383,47 @@ async def mark_payment(
             mark is None
             or mark.get("revoked_at")
             or mark.get("confirmed_payment_id")
-            or mark["basis_token"] != mark_basis_token(old)
-            or mark["dates"] != p["dates"]
-            or mark["currency"] != body.currency
-            or mark["amount"] != group["amount"]
+            or not same_transfer(mark, group)
+            or mark.get("plan_id") != plan_id(p, body.currency)
         ):
             raise conflict()
-    basis = settlement_basis(
-        old, {**p, "dates": [a["date"] for a in group["allocations"]]}, body.currency
-    )
-    basis_dates = {b["date"] for b in basis}
+    state = deepcopy(old["state"])
     payment = {
         **group,
         "id": str(uuid4()),
         "created_at": datetime.now(UTC).isoformat(),
         "created_by": user_id,
         "snapshot_token": body.token,
-        "basis_currencies": basis_currencies(old, basis),
-        "freeze_basis": basis,
-        "depends_on": [
-            payment["id"]
-            for payment in old["state"]["payments"]
-            if not payment.get("revoked_at")
-            and payment["currency"] == body.currency
-            and any(
-                a["date"] in basis_dates
-                for a in payment["allocations"] + payment.get("freeze_basis", [])
-            )
-        ],
     }
-    state = deepcopy(old["state"])
+    if len(old["members"]) > 2:
+        drop_broken_plans(old, state)
+        fix_plans(state, p, user_id)
+        payment.update(
+            format_version=FORMAT_VERSION,
+            plan_id=plan_id(p, body.currency),
+            **member_settlement(old, group),
+        )
+    else:
+        basis = settlement_basis(
+            old,
+            {**p, "dates": [a["date"] for a in group["allocations"]]},
+            body.currency,
+        )
+        basis_dates = {b["date"] for b in basis}
+        payment.update(
+            basis_currencies=basis_currencies(old, basis),
+            freeze_basis=basis,
+            depends_on=[
+                payment["id"]
+                for payment in old["state"]["payments"]
+                if not payment.get("revoked_at")
+                and payment["currency"] == body.currency
+                and any(
+                    a["date"] in basis_dates
+                    for a in payment["allocations"] + payment.get("freeze_basis", [])
+                )
+            ],
+        )
     if mark is not None:
         payment["mark_id"] = mark["id"]
         for saved_mark in state.get("payer_marks", []):
@@ -442,13 +469,6 @@ async def revoke_payment(
     return {"data": payment}
 
 
-def mark_basis_token(old):
-    basis = deepcopy(old)
-    basis.pop("revision", None)
-    basis["state"].pop("payer_marks", None)
-    return snapshot_token(basis)
-
-
 @router.post("/{trip_id}/payments/mark-paid", status_code=201)
 async def mark_paid(
     trip_id: str,
@@ -458,18 +478,8 @@ async def mark_paid(
     user_id: CurrentUser,
 ):
     old = await snapshot(trip_id, request, session, user_id)
-    if snapshot_token(old) != body.token:
-        raise conflict()
-    try:
-        p = payment_preview(
-            old, [d.isoformat() for d in body.dates] if body.dates is not None else None
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            422, detail={"code": "INVALID_SETTLEMENT_SCOPE", "message": str(exc)}
-        ) from exc
-    group = next((g for g in p["groups"] if g["currency"] == body.currency), None)
-    if group is None or group["offset_only"]:
+    p, group = requested_transfer(old, body)
+    if group is None or group.get("offset_only"):
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "没有待付款金额"}
         )
@@ -480,10 +490,11 @@ async def mark_paid(
     state = deepcopy(old["state"])
     marks = state.setdefault("payer_marks", [])
     for previous in marks:
+        # Other pairs' marks in the same range are untouched.
         if (
             not previous.get("revoked_at")
             and not previous.get("confirmed_payment_id")
-            and previous["currency"] == body.currency
+            and same_pair(previous, group)
             and set(previous["dates"]) & set(p["dates"])
         ):
             previous.update(
@@ -496,10 +507,14 @@ async def mark_paid(
         "id": str(uuid4()),
         "dates": p["dates"],
         "token": body.token,
-        "basis_token": mark_basis_token(old),
         "marked_by": user_id,
         "marked_at": datetime.now(UTC).isoformat(),
     }
+    if len(old["members"]) > 2:
+        # The first mark in a range fixes its whole proposal.
+        drop_broken_plans(old, state)
+        fix_plans(state, p, user_id)
+        mark["plan_id"] = plan_id(p, body.currency)
     marks.append(mark)
     await persist(trip_id, request, session, user_id, old, state)
     return {"data": mark}

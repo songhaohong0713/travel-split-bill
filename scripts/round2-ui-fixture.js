@@ -13,7 +13,6 @@ async function installRoundTwoFixture() {
   api.createTripInvite=async()=>({token:'synthetic-invite-only'})
   api.listExpenses=async()=>state.records
   api.createExpense=async(id,date,payload)=>{const r={id:'demo-expense',trip_id:id,occurred_at:date,payload,revision:1,is_creator:true};state.records.push(r);return r}
-  api.closeDay=async(id,date)=>state.closed.push(date)
   api.getLedger=async()=>{
     const paid=state.payments.some(p=>!p.revoked_at),value=pending().toFixed(2),date=state.records[0]?.occurred_at || day
     const transfer={currency:'CNY',amount:value,signed_amount:value,from_participant_id:'b',to_participant_id:'a'}

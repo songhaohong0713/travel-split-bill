@@ -156,7 +156,7 @@ def calculate_settlement(data: CalculateSettlementInput) -> SettlementResult:
         responsibility_by_participant=_money_map(responsibility, settlement_currency),
         paid_by_participant=_money_map(paid, settlement_currency),
         net_by_participant=_money_map(net, settlement_currency),
-        transfers=_minimum_transfers(net, settlement_currency),
+        transfers=minimum_transfers(net, settlement_currency),
         audit_lines=tuple(audit_lines),
     )
 
@@ -437,7 +437,7 @@ def _money_map(values: dict[str, Decimal], currency: str) -> dict[str, Money]:
     }
 
 
-def _minimum_transfers(net: dict[str, Decimal], currency: str) -> tuple[Transfer, ...]:
+def minimum_transfers(net: dict[str, Decimal], currency: str) -> tuple[Transfer, ...]:
     creditors = sorted(
         (
             (participant_id, amount)

@@ -171,7 +171,6 @@ def test_today_cannot_close_or_settle(ledger):
     c, base = ledger
     today = datetime.now(UTC).date().isoformat()
     expense(c, base, day=today)
-    assert c.post(base + "/days/" + today + "/close", headers=auth()).status_code == 422
     assert (
         c.post(
             base + "/payments/preview", headers=auth(), json={"dates": [today]}

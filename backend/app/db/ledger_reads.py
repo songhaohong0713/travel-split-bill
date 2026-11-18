@@ -54,7 +54,7 @@ def member_snapshots(session, user_id):
                 "revision": ledgers[trip.id].revision if trip.id in ledgers else 0,
                 "state": deepcopy(ledgers[trip.id].state_json)
                 if trip.id in ledgers
-                else {"closed_dates": [], "payments": []},
+                else {"payments": []},
             },
         )
         for trip in trips

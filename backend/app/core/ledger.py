@@ -1,10 +1,21 @@
-"""Daily balances reuse the money engine; payments offset, never rewrite, expenses."""
+"""Daily balances reuse the money engine; payments offset, never rewrite, expenses.
+
+Settlement records exist in exactly two stored formats:
+
+* legacy (no ``format_version``): ``allocations`` and ``freeze_basis`` hold one
+  signed number per date, read from the point of view of the record's own
+  sorted payer/recipient pair. Two-member trips keep writing this format.
+* ``format_version == 2``: stored per member. ``allocations`` is what the
+  recipient's net was reduced by on each date, ``payer_allocations`` the same
+  for the payer, and every ``freeze_basis`` row names its ``participant_id``.
+"""
 
 import hashlib
 import json
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from app.api.v1.settlements import ExpenseInput, _grouped_payload
 from app.core.business_time import (
@@ -12,7 +23,17 @@ from app.core.business_time import (
     client_timezone_offset,  # noqa: F401 - compatibility re-export
 )
 from app.core.money import quantized_money
-from app.core.settlement import _minimum_transfers
+from app.core.settlement import minimum_transfers
+
+FORMAT_VERSION = 2
+TRANSFER_IDENTITY = (
+    "currency",
+    "amount",
+    "from_participant_id",
+    "to_participant_id",
+    "allocations",
+    "payer_allocations",
+)
 
 
 def snapshot_token(snapshot):
@@ -34,22 +55,18 @@ def trip_today(snapshot, now=None):
     return ((now or datetime.now(UTC)) - timedelta(minutes=offset)).date().isoformat()
 
 
-def _raw_project(snapshot):
+def _raw_days(snapshot, records=None):
+    """Per-day expense groups before any settlement is applied."""
     members = sorted(snapshot["members"])
-    state = snapshot["state"]
-    dates = set(state["closed_dates"]) | {
-        r["occurred_at"] for r in snapshot["expenses"]
-    }
-    dates |= {a["date"] for p in state["payments"] for a in p["allocations"]}
-    days = []
-    for day in sorted(dates, reverse=True):
-        records = [r for r in snapshot["expenses"] if r["occurred_at"] == day]
-        balances = {}
+    all_records = snapshot["expenses"] if records is None else records
+    days = {}
+    for day in {r["occurred_at"] for r in all_records}:
+        records_of_day = [r for r in all_records if r["occurred_at"] == day]
         groups = []
         error = ""
         try:
             expenses = []
-            for record in records:
+            for record in records_of_day:
                 raw = record["payload"].get("expenses", [])
                 if not raw:
                     raise ValueError("消费缺少分摊数据")
@@ -69,123 +86,16 @@ def _raw_project(snapshot):
                     expenses.append(parsed.to_expense(snapshot["currency"]))
             if expenses:
                 groups = _grouped_payload(tuple(members), tuple(expenses))["groups"]
-            balances = _balances({"groups": groups})
         except (ValueError, ArithmeticError, TypeError, AttributeError):
             error = "消费分摊或汇率不完整，请打开消费修正"
-        for payment in state["payments"]:
-            if payment.get("revoked_at"):
-                continue
-            for allocation in payment["allocations"]:
-                if allocation["date"] == day:
-                    currency = payment["currency"]
-                    net = balances.setdefault(currency, {})
-                    for member, value in _legacy_net(
-                        members, allocation["amount"], payment
-                    ).items():
-                        net[member] = net.get(member, Decimal(0)) - value
-        pending = _pending(balances, members)
-        status = (
-            "recording"
-            if day not in state["closed_dates"]
-            else "invalid"
-            if error
-            else "pending"
-            if pending
-            else "settled"
-        )
-        days.append(
-            {
-                "date": day,
-                "status": status,
-                "error": error,
-                "count": len(records),
-                "expense_ids": [r["id"] for r in records],
-                "groups": groups,
-                "pending": pending,
-            }
-        )
-    return {
-        "days": days,
-        "payments": state["payments"],
-        "revision": snapshot["revision"],
-        "members": members,
-        "history_status": state.get("history_confirmation", {}).get(
-            "status", "not_required"
-        ),
-    }
-
-
-def payment_preview(snapshot, requested_dates=None, *, ledger=None):
-    if len(snapshot["members"]) > 2:
-        raise ValueError("多人结清尚未开放")
-    if (
-        "timezone_offset_minutes" in snapshot
-        and snapshot["timezone_offset_minutes"] is None
-    ):
-        raise ValueError("请旅行创建者先补设结算时区")
-    ledger = project(snapshot) if ledger is None else ledger
-    selected = (
-        sorted(set(requested_dates))
-        if requested_dates is not None
-        else sorted(d["date"] for d in ledger["days"] if d["status"] != "recording")
-    )
-    if not selected:
-        raise ValueError("今天的账单明天才能结清")
-    by_date = {d["date"]: d for d in ledger["days"]}
-    if any(day >= trip_today(snapshot) for day in selected):
-        raise ValueError("今天仍在记录中，不能结清")
-    if any(
-        day not in by_date or by_date[day]["status"] in ("recording", "invalid")
-        for day in selected
-    ):
-        raise ValueError("所选日期仍在记录中或消费数据不完整")
-    selected = [day for day in selected if by_date[day]["pending"]]
-    currencies = sorted(
-        {p["currency"] for day in selected for p in by_date[day]["pending"]}
-    )
-    groups = []
-    members = ledger["members"]
-    for currency in currencies:
-        allocations = [
-            {
-                "date": day,
-                "amount": next(
-                    (
-                        p["signed_amount"]
-                        for p in by_date[day]["pending"]
-                        if p["currency"] == currency
-                    ),
-                    "0",
-                ),
-            }
-            for day in selected
-            if any(p["currency"] == currency for p in by_date[day]["pending"])
-        ]
-        total = sum((Decimal(a["amount"]) for a in allocations), Decimal(0))
-        groups.append(
-            {
-                "currency": currency,
-                "amount": amount(currency, abs(total)),
-                "from_participant_id": members[1] if total >= 0 else members[0],
-                "to_participant_id": members[0] if total >= 0 else members[1],
-                "allocations": allocations,
-                "offset_only": total == 0,
-            }
-        )
-    return {"dates": selected, "groups": groups, "token": snapshot_token(snapshot)}
-
-
-def _raw_days(snapshot, records=None):
-    return {
-        d["date"]: d
-        for d in _raw_project(
-            {
-                **snapshot,
-                "expenses": snapshot["expenses"] if records is None else records,
-                "state": {"closed_dates": [], "payments": []},
-            }
-        )["days"]
-    }
+        days[day] = {
+            "date": day,
+            "error": error,
+            "count": len(records_of_day),
+            "expense_ids": [r["id"] for r in records_of_day],
+            "groups": groups,
+        }
+    return days
 
 
 def _balances(day):
@@ -212,10 +122,58 @@ def _legacy_net(members, value, payment):
     return net
 
 
+def _is_member_format(payment):
+    return payment.get("format_version") == FORMAT_VERSION
+
+
+def _deductions(members, payment):
+    """(date, member, amount) taken off each member's net by one settlement."""
+    if _is_member_format(payment):
+        for member, key in (
+            (payment["to_participant_id"], "allocations"),
+            (payment["from_participant_id"], "payer_allocations"),
+        ):
+            for allocation in payment[key]:
+                yield allocation["date"], member, Decimal(allocation["amount"])
+        return
+    for allocation in payment["allocations"]:
+        for member, value in _legacy_net(
+            members, allocation["amount"], payment
+        ).items():
+            yield allocation["date"], member, value
+
+
+def _transfer_dates(transfer):
+    return sorted(
+        {
+            a["date"]
+            for a in transfer["allocations"] + transfer.get("payer_allocations", [])
+        }
+    )
+
+
+def _member_dates(members, payment):
+    """Dates on which a settlement moved or froze each member's balance."""
+    if not _is_member_format(payment):
+        dates = {
+            a["date"] for a in payment["allocations"] + payment.get("freeze_basis", [])
+        }
+        return dict.fromkeys(members, dates)
+    touched = {
+        payment["to_participant_id"]: {a["date"] for a in payment["allocations"]},
+        payment["from_participant_id"]: {
+            a["date"] for a in payment["payer_allocations"]
+        },
+    }
+    for basis in payment["freeze_basis"]:
+        touched[basis["participant_id"]].add(basis["date"])
+    return touched
+
+
 def _pending(balances, members):
     pending = []
     for currency, net in sorted(balances.items()):
-        for transfer in _minimum_transfers(net, currency):
+        for transfer in minimum_transfers(net, currency):
             row = {
                 "currency": currency,
                 "amount": transfer.amount.amount,
@@ -237,6 +195,11 @@ def project(snapshot):
     active_ids = {p["id"] for p in active}
     for payment in active:
         if not set(payment.get("depends_on", [])).issubset(active_ids):
+            continue
+        if _is_member_format(payment):
+            for basis in payment["freeze_basis"]:
+                key = basis["date"], basis["currency"], basis["participant_id"]
+                frozen[key] = Decimal(basis["amount"])
             continue
         if "basis_currencies" in payment:
             for day, currencies in payment["basis_currencies"].items():
@@ -273,21 +236,17 @@ def project(snapshot):
             for currency in _balances(raw.get(day, {"groups": []})):
                 for member in members:
                     frozen.setdefault((day, currency, member), Decimal(0))
-    dates = set(raw) | set(snapshot["state"]["closed_dates"])
-    dates |= {
-        a["date"] for p in snapshot["state"]["payments"] for a in p["allocations"]
-    }
+    dates = set(raw)
+    for payment in snapshot["state"]["payments"]:
+        dates |= {day for day, _, _ in _deductions(members, payment)}
     balances = {d: _balances(raw.get(d, {"groups": []})) for d in dates}
     carries = {d: {} for d in dates}
     for payment in active:
-        for allocation in payment["allocations"]:
-            day, currency = allocation["date"], payment["currency"]
-            for member, value in _legacy_net(
-                members, allocation["amount"], payment
-            ).items():
-                if (day, currency, member) not in frozen:
-                    net = balances[day].setdefault(currency, {})
-                    net[member] = net.get(member, Decimal(0)) - value
+        currency = payment["currency"]
+        for day, member, value in _deductions(members, payment):
+            if (day, currency, member) not in frozen:
+                net = balances[day].setdefault(currency, {})
+                net[member] = net.get(member, Decimal(0)) - value
     today = trip_today(snapshot)
     for day, currency, member in frozen:
         balances.setdefault(day, {}).setdefault(currency, {})[member] = Decimal(0)
@@ -346,35 +305,53 @@ def project(snapshot):
             }
             for g in row["groups"]
         ]
+        # Two members freeze together, so one entry from the first member's
+        # side loses nothing. With more members every entry names its member.
         row["carry_entries"] = [
             {
                 "kind": "adjustment",
+                **(
+                    {}
+                    if len(members) <= 2
+                    else {"participant_id": entry["participant_id"]}
+                ),
                 "source_date": entry["source_date"],
                 "currency": entry["currency"],
                 "signed_amount": amount(entry["currency"], entry["signed_amount"]),
                 "amount": amount(entry["currency"], abs(entry["signed_amount"])),
             }
             for entry in carries.get(day, {}).values()
-            if entry["participant_id"] == members[0]
+            if len(members) > 2 or entry["participant_id"] == members[0]
         ]
         row["pending"] = _pending(balances[day], members)
+        row["balances"] = [
+            {
+                "currency": currency,
+                "participant_id": member,
+                "amount": amount(currency, value),
+            }
+            for currency, net in sorted(balances[day].items())
+            for member, value in sorted(net.items())
+            if value
+        ]
         if (
             "timezone_offset_minutes" in snapshot
             and snapshot["timezone_offset_minutes"] is None
         ):
             row["error"] = "请旅行创建者先补设结算时区"
-        recording = day >= today
+        # A member can hold a balance no transfer can match yet, so the day
+        # is judged by balances, not by whether a transfer exists.
         row["status"] = (
             "invalid"
             if row["error"]
             else "recording"
-            if recording
+            if day >= today
             else "pending"
-            if row["pending"]
+            if row["balances"]
             else "settled"
         )
         row["settled_transfers"] = [
-            p for p in active if any(a["date"] == day for a in p["allocations"])
+            p for p in active if any(d == day for d, _, _ in _deductions(members, p))
         ]
         days.append(row)
     return {
@@ -387,6 +364,396 @@ def project(snapshot):
         .get("history_confirmation", {})
         .get("status", "not_required"),
     }
+
+
+def _day_net(row, currency):
+    return {
+        b["participant_id"]: Decimal(b["amount"])
+        for b in row["balances"]
+        if b["currency"] == currency
+    }
+
+
+def _take(work, days, currency, member, target, totals):
+    """Assign `target` of a member's balance to one transfer, oldest day first.
+
+    Days running against the transfer are absorbed whole; the member's last
+    transfer takes everything that is left so no day keeps a stray remainder.
+    """
+    exhaust = totals[member] == target
+    left = target
+    rows = []
+    for day in days:
+        balance = work[day].get(member, Decimal(0))
+        if not balance:
+            continue
+        take = (
+            balance
+            if exhaust or (balance > 0) != (left > 0) or abs(balance) <= abs(left)
+            else left
+        )
+        work[day][member] = balance - take
+        left -= take
+        rows.append({"date": day, "amount": amount(currency, take)})
+        if not exhaust and not left:
+            break
+    totals[member] -= target
+    return rows
+
+
+def _plan_transfers(currency, net):
+    """Fewest transfers for the part of a date range that balances out."""
+    days = sorted(net)
+    work = {day: dict(net[day]) for day in days}
+    totals = {}
+    for day in days:
+        for member, value in work[day].items():
+            totals[member] = totals.get(member, Decimal(0)) + value
+    transfers = []
+    for transfer in minimum_transfers(dict(totals), currency):
+        value = Decimal(transfer.amount.amount)
+        if not value:
+            continue
+        payee, payer = transfer.to_participant_id, transfer.from_participant_id
+        transfers.append(
+            {
+                "currency": currency,
+                "amount": transfer.amount.amount,
+                "from_participant_id": payer,
+                "to_participant_id": payee,
+                "allocations": _take(work, days, currency, payee, value, totals),
+                "payer_allocations": _take(
+                    work, days, currency, payer, -value, totals
+                ),
+            }
+        )
+    return transfers
+
+
+def _plan_payments(snapshot, plan):
+    return [
+        p
+        for p in snapshot["state"]["payments"]
+        if not p.get("revoked_at") and p.get("plan_id") == plan["id"]
+    ]
+
+
+def _plan_holds(snapshot, by_date, plan):
+    """A fixed plan stands while balances only moved by its own settlements."""
+    expected = {
+        day: {member: Decimal(value) for member, value in net.items()}
+        for day, net in plan["basis"].items()
+    }
+    members = sorted(snapshot["members"])
+    for payment in _plan_payments(snapshot, plan):
+        for day, member, value in _deductions(members, payment):
+            net = expected.setdefault(day, {})
+            net[member] = net.get(member, Decimal(0)) - value
+    for day, net in expected.items():
+        current = _day_net(by_date[day], plan["currency"]) if day in by_date else {}
+        if any(
+            current.get(member, Decimal(0)) != net.get(member, Decimal(0))
+            for member in set(current) | set(net)
+        ):
+            return False
+    return True
+
+
+def _selected_days(snapshot, requested_dates, ledger):
+    selected = (
+        sorted(set(requested_dates))
+        if requested_dates is not None
+        else sorted(d["date"] for d in ledger["days"] if d["status"] != "recording")
+    )
+    if not selected:
+        raise ValueError("今天的账单明天才能结清")
+    by_date = {d["date"]: d for d in ledger["days"]}
+    if any(day >= trip_today(snapshot) for day in selected):
+        raise ValueError("今天仍在记录中，不能结清")
+    if any(
+        day not in by_date or by_date[day]["status"] in ("recording", "invalid")
+        for day in selected
+    ):
+        raise ValueError("所选日期仍在记录中或消费数据不完整")
+    return selected, by_date
+
+
+def _pair_groups(selected, by_date, members):
+    """The two-member proposal: one signed group per currency, as before."""
+    currencies = sorted(
+        {p["currency"] for day in selected for p in by_date[day]["pending"]}
+    )
+    groups = []
+    for currency in currencies:
+        allocations = [
+            {
+                "date": day,
+                "amount": next(
+                    (
+                        p["signed_amount"]
+                        for p in by_date[day]["pending"]
+                        if p["currency"] == currency
+                    ),
+                    "0",
+                ),
+            }
+            for day in selected
+            if any(p["currency"] == currency for p in by_date[day]["pending"])
+        ]
+        total = sum((Decimal(a["amount"]) for a in allocations), Decimal(0))
+        groups.append(
+            {
+                "currency": currency,
+                "amount": amount(currency, abs(total)),
+                "from_participant_id": members[1] if total >= 0 else members[0],
+                "to_participant_id": members[0] if total >= 0 else members[1],
+                "allocations": allocations,
+                "offset_only": total == 0,
+            }
+        )
+    return groups
+
+
+def settlement_scope(snapshot, requested_dates=None, *, ledger=None):
+    """`payment_preview` plus the plan each currency's transfers come from."""
+    if (
+        "timezone_offset_minutes" in snapshot
+        and snapshot["timezone_offset_minutes"] is None
+    ):
+        raise ValueError("请旅行创建者先补设结算时区")
+    ledger = project(snapshot) if ledger is None else ledger
+    selected, by_date = _selected_days(snapshot, requested_dates, ledger)
+    selected = [day for day in selected if by_date[day]["balances"]]
+    members = ledger["members"]
+    token = snapshot_token(snapshot)
+    if len(members) <= 2:
+        groups = _pair_groups(selected, by_date, members)
+        return {
+            "dates": selected,
+            "groups": groups,
+            "transfers": groups,
+            "token": token,
+            "plans": [],
+        }
+    plans = []
+    transfers = []
+    for currency in sorted({b["currency"] for d in selected for b in by_date[d]["balances"]}):
+        net = {
+            day: _day_net(by_date[day], currency)
+            for day in selected
+            if _day_net(by_date[day], currency)
+        }
+        # Once a range has a fixed plan its open transfers are never re-paired.
+        plan = next(
+            (
+                p
+                for p in reversed(snapshot["state"].get("plans", []))
+                if p["currency"] == currency
+                and {
+                    day
+                    for day in p["dates"]
+                    if day in by_date and _day_net(by_date[day], currency)
+                }
+                == set(net)
+                and _plan_holds(snapshot, by_date, p)
+            ),
+            None,
+        )
+        if plan is None:
+            plan = {
+                "id": None,
+                "currency": currency,
+                "dates": sorted(net),
+                "basis": {
+                    day: {m: amount(currency, v) for m, v in sorted(values.items())}
+                    for day, values in net.items()
+                },
+                "transfers": _plan_transfers(currency, net),
+            }
+        settled = {
+            (p["from_participant_id"], p["to_participant_id"])
+            for p in (_plan_payments(snapshot, plan) if plan["id"] else [])
+        }
+        plans.append(plan)
+        transfers += [
+            t
+            for t in plan["transfers"]
+            if (t["from_participant_id"], t["to_participant_id"]) not in settled
+        ]
+    return {"dates": selected, "transfers": transfers, "token": token, "plans": plans}
+
+
+def payment_preview(snapshot, requested_dates=None, *, ledger=None):
+    scope = settlement_scope(snapshot, requested_dates, ledger=ledger)
+    return {key: value for key, value in scope.items() if key != "plans"}
+
+
+def find_transfer(scope, currency, payer=None, payee=None):
+    return next(
+        (
+            t
+            for t in scope["transfers"]
+            if t["currency"] == currency
+            and (payer is None or t["from_participant_id"] == payer)
+            and (payee is None or t["to_participant_id"] == payee)
+        ),
+        None,
+    )
+
+
+def plan_id(scope, currency):
+    return next((p["id"] for p in scope["plans"] if p["currency"] == currency), None)
+
+
+def fix_plans(state, scope, user_id):
+    """Store the whole proposal of a range the first time someone acts on it."""
+    plans = state.setdefault("plans", [])
+    known = {p["id"] for p in plans}
+    for plan in scope["plans"]:
+        if plan["id"] is None:
+            plan["id"] = str(uuid4())
+            plan["created_by"] = user_id
+            plan["created_at"] = datetime.now(UTC).isoformat()
+        if plan["id"] not in known:
+            plans.append(deepcopy(plan))
+
+
+def drop_broken_plans(snapshot, state):
+    """Forget fixed plans that an expense change or outside settlement broke."""
+    if not state.get("plans"):
+        return
+    by_date = {d["date"]: d for d in project(snapshot)["days"]}
+    state["plans"] = [p for p in state["plans"] if _plan_holds(snapshot, by_date, p)]
+
+
+def same_transfer(left, right):
+    return all(left.get(key) == right.get(key) for key in TRANSFER_IDENTITY)
+
+
+def mark_is_valid(snapshot, mark, *, ledger=None):
+    """A mark stands or falls with its own transfer, not with the whole ledger."""
+    if mark.get("revoked_at") or mark.get("confirmed_payment_id"):
+        return False
+    try:
+        scope = settlement_scope(snapshot, mark["dates"], ledger=ledger)
+    except ValueError:
+        return False
+    transfer = find_transfer(
+        scope, mark["currency"], mark["from_participant_id"], mark["to_participant_id"]
+    )
+    return (
+        transfer is not None
+        and same_transfer(transfer, mark)
+        and mark.get("plan_id") == plan_id(scope, mark["currency"])
+    )
+
+
+def annotate_transfers(snapshot, ledger):
+    """Mark staleness, and per day every transfer touching it with its status."""
+    members = ledger["members"]
+    ledger["payer_marks"] = [
+        {**m, "stale": not mark_is_valid(snapshot, m, ledger=ledger)}
+        for m in ledger["payer_marks"]
+    ]
+    rows = [
+        {"status": "settled", "payment_id": p["id"]}
+        | _transfer_row(p, sorted({d for d, _, _ in _deductions(members, p)}))
+        for p in ledger["payments"]
+        if not p.get("revoked_at")
+    ]
+    marked = [m for m in ledger["payer_marks"] if not m["stale"]]
+    rows += [
+        {"status": "marked", "mark_id": m["id"]} | _transfer_row(m, _transfer_dates(m))
+        for m in marked
+    ]
+    try:
+        open_transfers = settlement_scope(snapshot, ledger=ledger)["transfers"]
+    except ValueError:
+        open_transfers = []
+    for transfer in open_transfers:
+        dates = _transfer_dates(transfer)
+        if not any(
+            same_pair(transfer, m) and set(dates) & set(_transfer_dates(m))
+            for m in marked
+        ):
+            rows.append({"status": "pending"} | _transfer_row(transfer, dates))
+    for day in ledger["days"]:
+        day["transfers"] = [row for row in rows if day["date"] in row["dates"]]
+    return ledger
+
+
+def same_pair(left, right):
+    return all(
+        left[key] == right[key]
+        for key in ("currency", "from_participant_id", "to_participant_id")
+    )
+
+
+def _transfer_row(transfer, dates):
+    return {
+        # Handwritten legacy records may lack the endpoints and the amount.
+        "currency": transfer["currency"],
+        "amount": transfer.get("amount"),
+        "from_participant_id": transfer.get("from_participant_id"),
+        "to_participant_id": transfer.get("to_participant_id"),
+        "dates": dates,
+        **({"offset_only": True} if transfer.get("offset_only") else {}),
+    }
+
+
+def member_settlement(snapshot, transfer):
+    """Freeze basis and dependencies of a multi-member transfer being confirmed.
+
+    A party is frozen on each day this transfer brings their balance to zero.
+    Adjustments that had rolled onto such a day are settled with it, so their
+    source days are re-based to today's raw net as well.
+    """
+    members = sorted(snapshot["members"])
+    currency = transfer["currency"]
+    by_date = {d["date"]: d for d in project(snapshot)["days"]}
+    raw = _raw_days(snapshot)
+    frozen = set()
+    for member, key in (
+        (transfer["to_participant_id"], "allocations"),
+        (transfer["from_participant_id"], "payer_allocations"),
+    ):
+        for allocation in transfer[key]:
+            day = by_date[allocation["date"]]
+            balance = _day_net(day, currency).get(member, Decimal(0))
+            if balance != Decimal(allocation["amount"]):
+                continue
+            frozen.add((allocation["date"], member))
+            frozen |= {
+                (carry["source_date"], member)
+                for carry in day["carry_entries"]
+                if carry["currency"] == currency and carry["participant_id"] == member
+            }
+    basis = [
+        {
+            "date": day,
+            "currency": currency,
+            "participant_id": member,
+            "amount": amount(
+                currency,
+                _balances(raw.get(day, {"groups": []}))
+                .get(currency, {})
+                .get(member, Decimal(0)),
+            ),
+        }
+        for day, member in sorted(frozen)
+    ]
+    touched = _member_dates(members, {**transfer, "freeze_basis": basis, "format_version": FORMAT_VERSION})
+    depends_on = [
+        payment["id"]
+        for payment in snapshot["state"]["payments"]
+        if not payment.get("revoked_at")
+        and payment["currency"] == currency
+        and any(
+            dates & _member_dates(members, payment).get(member, set())
+            for member, dates in touched.items()
+        )
+    ]
+    return {"freeze_basis": basis, "depends_on": depends_on}
 
 
 def settlement_basis(snapshot, preview, currency):

@@ -82,7 +82,6 @@ def test_paid_200_then_230_only_30_and_revoke(ledger):
         c.get(base + "/ledger", headers=auth()).json()["data"]["days"][0]["status"]
         == "pending"
     )
-    assert c.post(base + "/days/2026-10-07/close", headers=auth("b")).status_code == 200
     p = preview(c, base)
     assert p["groups"][0]["amount"] == "200.00"
     r = pay(c, base, p)
@@ -101,10 +100,6 @@ def test_paid_200_then_230_only_30_and_revoke(ledger):
         ).status_code
         == 200
     )
-    c.post(
-        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
-        headers=auth(),
-    )
     assert preview(c, base)["groups"][0]["amount"] == "30.00"
     assert (
         c.post(base + f"/payments/{payment_id}/revoke", headers=auth()).status_code
@@ -118,8 +113,6 @@ def test_global_offsets_days_and_excludes_recording(ledger):
     expense(c, base, "200", "2026-10-05", "b")
     expense(c, base, "300", "2026-10-06")
     expense(c, base, "1000", datetime.now(UTC).date().isoformat())
-    for day in ("2026-10-05", "2026-10-06"):
-        c.post(base + f"/days/{day}/close", headers=auth())
     p = preview(c, base)
     assert p["dates"] == ["2026-10-05", "2026-10-06"]
     assert p["groups"][0]["amount"] == "50.00"
@@ -135,29 +128,19 @@ def test_global_offsets_days_and_excludes_recording(ledger):
 def test_stale_preview_and_outsider_rejected(ledger):
     c, base = ledger
     expense(c, base)
-    c.post(base + "/days/2026-10-07/close", headers=auth())
     p = preview(c, base)
     expense(c, base, "60")
     assert pay(c, base, p).status_code == 409
     assert c.get(base + "/ledger", headers=auth("outsider")).status_code == 404
-    assert (
-        c.post(base + "/days/2026-10-07/close", headers=auth("outsider")).status_code
-        == 404
-    )
 
 
 def test_overpayment_becomes_reverse_refund_and_currencies_stay_separate(ledger):
     c, base = ledger
     saved, body = expense(c, base)
-    c.post(base + "/days/2026-10-07/close", headers=auth())
     assert pay(c, base, preview(c, base)).status_code == 201
     body["payload"]["expenses"][0]["items"][0]["amount"]["amount"] = "360"
     c.patch(
         base + "/expenses/" + saved["id"], headers=auth(), json={**body, "revision": 1}
-    )
-    c.post(
-        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
-        headers=auth(),
     )
     group = preview(c, base)["groups"][0]
     assert (
@@ -173,7 +156,6 @@ def test_zero_net_offsets_can_be_settled_and_revoked(ledger):
     c, base = ledger
     for day, payer in [("2026-10-05", "a"), ("2026-10-06", "b")]:
         expense(c, base, "200", day, payer)
-        c.post(base + f"/days/{day}/close", headers=auth())
     p = preview(c, base)
     assert p["groups"][0]["offset_only"]
     r = pay(c, base, p)
@@ -192,14 +174,9 @@ def test_zero_net_offsets_can_be_settled_and_revoked(ledger):
 def test_deleted_paid_expense_leaves_refund_and_trip_can_be_deleted(ledger):
     c, base = ledger
     saved, _ = expense(c, base)
-    c.post(base + "/days/2026-10-07/close", headers=auth())
     pay(c, base, preview(c, base))
     assert (
         c.delete(base + "/expenses/" + saved["id"], headers=auth()).status_code == 204
-    )
-    c.post(
-        base + "/days/" + datetime.now(UTC).date().isoformat() + "/close",
-        headers=auth(),
     )
     assert preview(c, base)["groups"][0]["from_participant_id"] == "a"
     assert c.delete(base, headers=auth()).status_code == 204
@@ -227,7 +204,6 @@ def test_trip_dates_can_be_saved_and_owner_can_edit(ledger):
 def test_home_summary_never_offsets_separate_trips(ledger):
     c, base = ledger
     expense(c, base, "200")
-    c.post(base + "/days/2026-10-07/close", headers=auth())
     trip = c.post(
         "/v1/trips",
         headers=auth(),
@@ -237,7 +213,6 @@ def test_home_summary_never_offsets_separate_trips(ledger):
     token = c.post(other + "/invites", headers=auth()).json()["data"]["token"]
     c.post("/v1/trip-invites/" + token + "/accept", headers=auth("b"))
     expense(c, other, "300", payer="b")
-    c.post(other + "/days/2026-10-07/close", headers=auth())
     result = c.get("/v1/trips/ledger-summary", headers=auth()).json()["data"]
     assert result["groups"] == [
         {"currency": "CNY", "receivable": "100.00", "payable": "150.00"}
@@ -372,7 +347,6 @@ def test_invalid_save_preserves_previous_expense_and_projection(ledger):
         ).status_code
         == 422
     )
-    c.post(base + "/days/2026-10-07/close", headers=auth())
     payment = pay(c, base, preview(c, base)).json()["data"]
     c.post(base + "/payments/" + payment["id"] + "/revoke", headers=auth())
     with SessionLocal() as session:

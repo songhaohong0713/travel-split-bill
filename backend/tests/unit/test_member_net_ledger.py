@@ -2,7 +2,7 @@ from copy import deepcopy
 from decimal import Decimal
 
 import pytest
-from app.core.ledger import _balances, _raw_days, payment_preview, project
+from app.core.ledger import _balances, _raw_days, project
 from test_daily_ledger import record, snapshot
 
 
@@ -84,21 +84,6 @@ def test_pending_matches_shared_transfer_order_for_multiple_creditors_and_curren
             "to_participant_id": "d",
         },
     ]
-
-
-@pytest.mark.parametrize("supplied_ledger", [False, True])
-@pytest.mark.parametrize("missing_timezone", [False, True])
-def test_preview_rejects_more_than_two_members_before_selecting_transfers(
-    supplied_ledger, missing_timezone
-):
-    s = snapshot()
-    s["members"].append("c")
-    if missing_timezone:
-        s["timezone_offset_minutes"] = None
-    kwargs = {"ledger": project(s)} if supplied_ledger else {}
-
-    with pytest.raises(ValueError, match="^多人结清尚未开放$"):
-        payment_preview(s, **kwargs)
 
 
 @pytest.mark.parametrize("signed,expected", [("40.00", "160.00"), ("-40.00", "240.00")])

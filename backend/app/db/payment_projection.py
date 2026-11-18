@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.core.ledger import FORMAT_VERSION
 from app.db.models import PaymentAllocationRecord, PaymentRecord
 
 
@@ -36,6 +37,15 @@ def sync_payments(session, trip_id, state):
             total = sum((Decimal(a["amount"]) for a in allocations), Decimal(0))
             if abs(total) != Decimal(payment["amount"]):
                 raise ValueError("转账与逐日抵扣金额不一致")
+            if payment.get("format_version") == FORMAT_VERSION:
+                # Per-member records: the recipient side is projected, and the
+                # payer side must mirror the same transfer amount.
+                paid = sum(
+                    (Decimal(a["amount"]) for a in payment["payer_allocations"]),
+                    Decimal(0),
+                )
+                if total != Decimal(payment["amount"]) or paid != -total:
+                    raise ValueError("转账与逐日抵扣金额不一致")
             for allocation in allocations:
                 session.add(
                     PaymentAllocationRecord(

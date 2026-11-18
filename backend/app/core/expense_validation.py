@@ -6,6 +6,9 @@ from decimal import Decimal
 from app.core.money import currency_scale, decimal_from_string, quantize_decimal
 from app.core.settlement import calculate_grouped_settlement
 
+# A trip holds at most six members and an expense may involve all of them.
+MAX_PARTICIPANTS = 6
+
 
 def validate_expense_payload(
     payload: dict, members: set[str], default_currency: str
@@ -20,7 +23,7 @@ def validate_expense_payload(
     if (
         not isinstance(people, list)
         or not people
-        or len(people) > 2
+        or len(people) > MAX_PARTICIPANTS
         or any(not isinstance(p, str) or not p for p in people)
     ):
         raise ValueError("请提供有效的参与成员")

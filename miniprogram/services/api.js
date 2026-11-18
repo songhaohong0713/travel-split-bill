@@ -169,7 +169,6 @@ async function getLedger(tripId) {
   offline.cacheLedger(tripId,result)
   return result
 }
-function closeDay(tripId, date) { return request(`/v1/trips/${tripId}/days/${date}/close`, { method: 'POST' }) }
 function previewPayment(tripId, dates = null) { return request(`/v1/trips/${tripId}/payments/preview`, { method: 'POST', data: { dates } }) }
 function markPayment(tripId, data) { return request(`/v1/trips/${tripId}/payments`, { method: 'POST', data }) }
 function revokePayment(tripId, id) { return request(`/v1/trips/${tripId}/payments/${id}/revoke`, { method: 'POST' }) }
@@ -181,7 +180,7 @@ function updateTripDates(tripId, data) {
 }
 function markPaid(tripId,data) { return request(`/v1/trips/${tripId}/payments/mark-paid`,{method:'POST',data}) }
 function revokePayerMark(tripId,id) { return request(`/v1/trips/${tripId}/payer-marks/${id}/revoke`,{method:'POST'}) }
-module.exports = { markPaid, revokePayerMark, getLedger, closeDay, previewPayment, markPayment, revokePayment, ledgerSummary, updateTripDates }
+module.exports = { markPaid, revokePayerMark, getLedger, previewPayment, markPayment, revokePayment, ledgerSummary, updateTripDates }
 Object.assign(module.exports, { request, login, ensureAuthenticated, createTrip, getExchangeRate, listTrips, listTripMembers, createTripInvite, getTripInvite, acceptTripInvite, createExpense, listExpenses, updateExpense, deleteExpense, deleteTrip, previewSettlement, publishSettlement, createShareLink, uploadReceipt, getReceiptJob, getExpenseReceipt, downloadExpenseReceipt })
 
 function updateProfile(nickname){return request('/v1/me',{method:'PATCH',data:{nickname}})}

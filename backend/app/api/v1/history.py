@@ -83,7 +83,7 @@ async def prepare_history(
     status = state.get("history_confirmation", {}).get("status")
     if status == "pending":
         return {"data": {"status": "pending"}}
-    if status == "confirmed" or state["payments"] or state["closed_dates"]:
+    if status == "confirmed" or state["payments"]:
         raise HTTPException(
             409,
             detail={

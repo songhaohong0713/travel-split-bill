@@ -32,9 +32,15 @@ def test_two_member_ledger_matches_before_refactor(client, monkeypatch, case):
 
     assert response.status_code == 200
     # No field removal, numeric conversion, sorting of arrays, or normalization.
-    assert response.json() == case["response"]
+    # Phase 2 only adds: per-day `transfers` and `balances`, preview `transfers`.
+    body = response.json()
+    for day in body["data"]["days"]:
+        assert {"transfers", "balances"} <= set(day)
+        del day["transfers"], day["balances"]
+    assert body == case["response"]
     if "preview" in case:
         preview = payment_preview(snapshot)
+        assert preview.pop("transfers") == preview["groups"]
         assert preview == case["preview"]
         assert {
             g["currency"]: settlement_basis(snapshot, preview, g["currency"])

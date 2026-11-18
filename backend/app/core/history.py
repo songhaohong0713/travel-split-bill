@@ -17,15 +17,14 @@ from app.core.ledger import (
 
 
 def historical_plan(old, selection, user_id):
+    if len(old["members"]) != 2:
+        raise ValueError("历史确认只支持两人旅行")
     if old["state"].get("history_confirmation", {}).get("status") != "pending":
         raise ValueError("当前旅行没有待确认的历史结算")
     dates = sorted({record["occurred_at"] for record in old["expenses"]})
     if not dates:
         raise ValueError("没有历史消费需要确认")
     stage = deepcopy(old)
-    stage["state"]["closed_dates"] = sorted(
-        set(stage["state"]["closed_dates"]) | set(dates)
-    )
     stage["state"]["history_confirmation"] = {
         "status": "confirmed",
         "confirmed_by": user_id,
