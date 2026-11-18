@@ -25,7 +25,6 @@ from app.core.ledger import (
     fix_plans,
     member_settlement,
     payment_preview,
-    plan_id,
     project,
     same_pair,
     same_transfer,
@@ -169,6 +168,10 @@ class PaymentRequest(Scope):
     # Which transfer of the proposal; may be omitted while a trip has two members.
     from_participant_id: str | None = Field(default=None, min_length=1, max_length=36)
     to_participant_id: str | None = Field(default=None, min_length=1, max_length=36)
+    # Instead of a pair: the member whose days cancel out (an offset, no money).
+    offset_participant_id: str | None = Field(default=None, min_length=1, max_length=36)
+    # Tells apart two proposed transfers between the same pair.
+    plan_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 async def snapshot(trip_id, request, session, user_id):
@@ -204,9 +207,7 @@ async def snapshot(trip_id, request, session, user_id):
         "timezone_offset_minutes": trip.timezone_offset_minutes,
         "members": members,
         "revision": ledger.revision if ledger else 0,
-        "state": deepcopy(ledger.state_json)
-        if ledger
-        else {"payments": []},
+        "state": deepcopy(ledger.state_json) if ledger else {"payments": []},
         "expenses": [
             {
                 "id": r.id,
@@ -286,9 +287,9 @@ async def get_ledger(
     result["expense_summaries"] = []
     totals: dict[str, Decimal] = {}
     for record in old["expenses"]:
-        day = project(
-            {**old, "expenses": [record], "state": {"payments": []}}
-        )["days"][0]
+        day = project({**old, "expenses": [record], "state": {"payments": []}})["days"][
+            0
+        ]
         result["expense_summaries"].append(
             {"id": record["id"], "groups": day["groups"], "error": day["error"]}
         )
@@ -333,8 +334,11 @@ def requested_transfer(old, body):
     if snapshot_token(old) != body.token:
         raise conflict()
     pair = (body.from_participant_id, body.to_participant_id)
-    if (pair[0] is None) != (pair[1] is None) or (
-        pair[0] is None and len(old["members"]) > 2
+    offset = body.offset_participant_id
+    if (
+        (pair[0] is None) != (pair[1] is None)
+        or (offset is not None and pair[0] is not None)
+        or (offset is None and pair[0] is None and len(old["members"]) > 2)
     ):
         raise HTTPException(
             422,
@@ -351,7 +355,25 @@ def requested_transfer(old, body):
         raise HTTPException(
             422, detail={"code": "INVALID_SETTLEMENT_SCOPE", "message": str(exc)}
         ) from exc
-    return scope, find_transfer(scope, body.currency, *pair)
+    blocked = [c for c in scope.get("conflicts", []) if c["currency"] == body.currency]
+    if blocked:
+        dates = sorted({day for c in blocked for day in c["dates"]})
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MARKED_TRANSFER_PENDING",
+                "message": "这些日期已有人标记付款或确认收款，请先处理："
+                + "、".join(dates),
+                "dates": dates,
+            },
+        )
+    mark = next(
+        (m for m in old["state"].get("payer_marks", []) if m["id"] == body.mark_id),
+        None,
+    )
+    plan = body.plan_id or (mark or {}).get("plan_id")
+    found = find_transfer(scope, body.currency, *pair, offset=offset, plan=plan)
+    return scope, found, mark
 
 
 @router.post("/{trip_id}/payments", status_code=201)
@@ -363,8 +385,10 @@ async def mark_payment(
     user_id: CurrentUser,
 ):
     old = await snapshot(trip_id, request, session, user_id)
-    p, group = requested_transfer(old, body)
+    p, group, mark = requested_transfer(old, body)
     if group is None:
+        if body.mark_id:
+            raise conflict()
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
         )
@@ -373,20 +397,14 @@ async def mark_payment(
             403,
             detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认已收款"},
         )
-    mark = None
-    if body.mark_id:
-        mark = next(
-            (m for m in old["state"].get("payer_marks", []) if m["id"] == body.mark_id),
-            None,
-        )
-        if (
-            mark is None
-            or mark.get("revoked_at")
-            or mark.get("confirmed_payment_id")
-            or not same_transfer(mark, group)
-            or mark.get("plan_id") != plan_id(p, body.currency)
-        ):
-            raise conflict()
+    if body.mark_id and (
+        mark is None
+        or mark.get("revoked_at")
+        or mark.get("confirmed_payment_id")
+        or not same_transfer(mark, group)
+        or mark.get("plan_id") != group.get("plan_id")
+    ):
+        raise conflict()
     state = deepcopy(old["state"])
     payment = {
         **group,
@@ -398,9 +416,10 @@ async def mark_payment(
     if len(old["members"]) > 2:
         drop_broken_plans(old, state)
         fix_plans(state, p, user_id)
+        # Fixing the plans has just given the row its plan id.
         payment.update(
             format_version=FORMAT_VERSION,
-            plan_id=plan_id(p, body.currency),
+            plan_id=group["plan_id"],
             **member_settlement(old, group),
         )
     else:
@@ -478,7 +497,7 @@ async def mark_paid(
     user_id: CurrentUser,
 ):
     old = await snapshot(trip_id, request, session, user_id)
-    p, group = requested_transfer(old, body)
+    p, group, _ = requested_transfer(old, body)
     if group is None or group.get("offset_only"):
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "没有待付款金额"}
@@ -514,7 +533,7 @@ async def mark_paid(
         # The first mark in a range fixes its whole proposal.
         drop_broken_plans(old, state)
         fix_plans(state, p, user_id)
-        mark["plan_id"] = plan_id(p, body.currency)
+        mark["plan_id"] = group["plan_id"]
     marks.append(mark)
     await persist(trip_id, request, session, user_id, old, state)
     return {"data": mark}

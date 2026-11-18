@@ -17,3 +17,8 @@ They add nullable trip nicknames, cleanup attempt counts, fixed trip UTC offsets
 conservative receipt retention timestamps and service-only operational RPCs.
 Old trips stay without an offset until their creator sets it; old images begin
 a fresh 30-day retention window. No historic payment record is rewritten.
+
+For multi-member settlement, apply `20261119010000_offset_settlement.sql` before
+deploying the matching backend. It only makes `payment_records.from_id`
+nullable, so that an offset (one member's days cancelling out, amount 0, no
+payer) can be projected. Existing rows and the projection trigger are unchanged.

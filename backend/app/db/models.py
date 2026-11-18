@@ -115,7 +115,8 @@ class PaymentRecord(Base):
     )
     currency: Mapped[str] = mapped_column(String(3))
     amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
-    from_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    # Null for an offset: one member's days cancel out and nobody pays.
+    from_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     to_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -167,7 +168,9 @@ class ReceiptImage(Base):
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     object_key: Mapped[str] = mapped_column(String(255), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class ReceiptJob(Base):
@@ -190,7 +193,9 @@ class ReceiptCleanup(Base):
     # No trip FK: cleanup survives deletion of the trip and its image metadata.
     object_key: Mapped[str] = mapped_column(String(255), primary_key=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class ExpenseRecord(Base):

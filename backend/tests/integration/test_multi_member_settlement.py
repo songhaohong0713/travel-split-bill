@@ -127,9 +127,7 @@ def test_three_members_equal_split_needs_two_transfers(ledger):
     assert "groups" not in p
     assert pairs(p["transfers"]) == [("b", "a", "100.00"), ("c", "a", "100.00")]
     assert p["transfers"][0]["allocations"] == [{"date": D1, "amount": "100.00"}]
-    assert p["transfers"][0]["payer_allocations"] == [
-        {"date": D1, "amount": "-100.00"}
-    ]
+    assert p["transfers"][0]["payer_allocations"] == [{"date": D1, "amount": "-100.00"}]
     data, days = view(c, base)
     assert pairs(data["summary"]) == pairs(p["transfers"])
     assert [(*pairs([t]), t["status"]) for t in days[D1]["transfers"]] == [
@@ -262,9 +260,7 @@ def test_edit_after_one_settlement_freezes_only_the_settled_member(ledger):
     # The unconfirmed mark was made against the old plan and is void.
     marks = {m["id"]: m for m in data["payer_marks"]}
     assert marks[mark_c["id"]]["stale"] is True
-    assert (
-        confirm(c, base, "c", "a", [D1], mark_id=mark_c["id"]).status_code == 409
-    )
+    assert confirm(c, base, "c", "a", [D1], mark_id=mark_c["id"]).status_code == 409
     # Settling the day together with the adjustment date balances everyone.
     assert pairs(scope(c, base, [D1, D2])["transfers"]) == [
         ("c", "a", "110.00"),
@@ -370,11 +366,15 @@ def test_revoking_a_settlement_another_depends_on_is_rejected(ledger):
     assert blocked.json()["error"]["code"] == "PAYMENT_DEPENDENCY"
     assert blocked.json()["error"]["dates"] == [D1]
     assert (
-        c.post(base + "/payments/" + second["id"] + "/revoke", headers=auth()).status_code
+        c.post(
+            base + "/payments/" + second["id"] + "/revoke", headers=auth()
+        ).status_code
         == 200
     )
     assert (
-        c.post(base + "/payments/" + first["id"] + "/revoke", headers=auth()).status_code
+        c.post(
+            base + "/payments/" + first["id"] + "/revoke", headers=auth()
+        ).status_code
         == 200
     )
     assert pairs(scope(c, base)["transfers"]) == [
@@ -394,7 +394,9 @@ def test_settlements_between_unrelated_members_do_not_depend_on_each_other(ledge
 
     assert second["depends_on"] == []
     assert (
-        c.post(base + "/payments/" + first["id"] + "/revoke", headers=auth()).status_code
+        c.post(
+            base + "/payments/" + first["id"] + "/revoke", headers=auth()
+        ).status_code
         == 200
     )
 
@@ -490,3 +492,164 @@ def test_day_close_endpoint_is_gone(ledger):
         404,
         405,
     )
+
+
+def offset(c, base, member, dates=None, by="c"):
+    p = scope(c, base, dates)
+    return c.post(
+        base + "/payments",
+        headers=auth(by),
+        json={
+            "dates": p["dates"],
+            "token": p["token"],
+            "currency": "CNY",
+            "offset_participant_id": member,
+        },
+    )
+
+
+def offsets(transfers):
+    return [
+        (t["to_participant_id"], t["allocations"])
+        for t in transfers
+        if t.get("offset_only")
+    ]
+
+
+def test_members_whose_days_cancel_out_get_an_offset_each(ledger):
+    c, base = ledger
+    join(base, "c")
+    spend(c, base, {"b": "100"}, payer="a", day=D1)
+    spend(c, base, {"a": "100"}, payer="b", day=D2)
+
+    p = scope(c, base)
+
+    assert pairs(p["transfers"]) == [(None, "a", "0.00"), (None, "b", "0.00")]
+    assert offsets(p["transfers"]) == [
+        ("a", [{"date": D1, "amount": "100.00"}, {"date": D2, "amount": "-100.00"}]),
+        ("b", [{"date": D1, "amount": "-100.00"}, {"date": D2, "amount": "100.00"}]),
+    ]
+    # An offset moves no money: it cannot be marked as paid.
+    body = {"dates": p["dates"], "token": p["token"], "currency": "CNY"}
+    marked = c.post(
+        base + "/payments/mark-paid",
+        headers=auth("a"),
+        json={**body, "offset_participant_id": "a"},
+    )
+    assert marked.status_code == 422
+    # Any member may confirm it.
+    first = offset(c, base, "a", by="c")
+    assert first.status_code == 201, first.text
+    assert first.json()["data"]["format_version"] == 2
+    assert first.json()["data"]["from_participant_id"] is None
+    _, days = view(c, base)
+    assert {d: days[d]["status"] for d in days} == {D1: "pending", D2: "pending"}
+    assert offset(c, base, "b", by="a").status_code == 201
+
+    data, days = view(c, base)
+    assert {d: days[d]["status"] for d in days} == {D1: "settled", D2: "settled"}
+    assert data["summary"] == []
+    revoked = c.post(
+        base + "/payments/" + first.json()["data"]["id"] + "/revoke", headers=auth()
+    )
+    assert revoked.status_code == 200
+    assert offsets(scope(c, base)["transfers"])[0][0] == "a"
+
+
+def test_offset_sits_next_to_the_transfer_that_passes_through_a_member(ledger):
+    c, base = ledger
+    join(base, "c")
+    spend(c, base, {"b": "100"}, payer="a", day=D1)
+    spend(c, base, {"a": "100"}, payer="c", day=D2)
+
+    p = scope(c, base)
+
+    assert pairs(p["transfers"]) == [("b", "c", "100.00"), (None, "a", "0.00")]
+    assert confirm(c, base, "b", "c").status_code == 201
+    _, days = view(c, base)
+    assert {d: days[d]["status"] for d in days} == {D1: "pending", D2: "pending"}
+    assert offset(c, base, "a").status_code == 201
+
+    data, days = view(c, base)
+    assert {d: days[d]["status"] for d in days} == {D1: "settled", D2: "settled"}
+    assert data["summary"] == []
+
+
+def two_days(ledger):
+    c, base = ledger
+    join(base, "c")
+    spend(c, base, {"a": "100", "b": "100", "c": "100"}, payer="a", day=D1)
+    spend(c, base, {"a": "100", "b": "100", "c": "100"}, payer="b", day=D2)
+    return c, base
+
+
+def test_a_marked_transfer_survives_settlements_over_a_wider_range(ledger):
+    c, base = two_days(ledger)
+    # Paired on their own, both days together need only c->a and c->b.
+    assert pairs(scope(c, base)["transfers"]) == [
+        ("c", "a", "100.00"),
+        ("c", "b", "100.00"),
+    ]
+    marked = mark(c, base, "b", "a", [D1])
+    assert marked.status_code == 201, marked.text
+    mark_id = marked.json()["data"]["id"]
+
+    everything = scope(c, base)
+
+    assert everything["conflicts"] == []
+    assert pairs(everything["transfers"]) == [
+        ("b", "a", "100.00"),
+        ("c", "a", "100.00"),
+        ("a", "b", "100.00"),
+        ("c", "b", "100.00"),
+    ]
+    data, days = view(c, base)
+    assert [(*pairs([t]), t["status"]) for t in days[D1]["transfers"]] == [
+        (("b", "a", "100.00"), "marked"),
+        (("c", "a", "100.00"), "pending"),
+    ]
+    assert pairs(data["summary"]) == pairs(everything["transfers"])
+
+    assert confirm(c, base, "c", "a").status_code == 201
+    assert confirm(c, base, "c", "b").status_code == 201
+
+    marks = {m["id"]: m for m in view(c, base)[0]["payer_marks"]}
+    assert marks[mark_id]["stale"] is False
+    assert confirm(c, base, "b", "a", mark_id=mark_id).status_code == 201
+    assert confirm(c, base, "a", "b").status_code == 201
+    data, days = view(c, base)
+    assert {d: days[d]["status"] for d in days} == {D1: "settled", D2: "settled"}
+
+
+def test_range_cutting_through_a_marked_plan_cannot_be_settled(ledger):
+    c, base = two_days(ledger)
+    assert mark(c, base, "c", "a").status_code == 201
+
+    part = scope(c, base, [D1])
+
+    assert part["conflicts"] == [{"currency": "CNY", "dates": [D1, D2]}]
+    blocked = confirm(c, base, "b", "a", [D1])
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "MARKED_TRANSFER_PENDING"
+    assert blocked.json()["error"]["dates"] == [D1, D2]
+    assert mark(c, base, "b", "a", [D1]).status_code == 409
+    assert view(c, base)[0]["payments"] == []
+    # The whole range is still open, exactly as it was marked.
+    assert pairs(scope(c, base)["transfers"]) == [
+        ("c", "a", "100.00"),
+        ("c", "b", "100.00"),
+    ]
+
+
+def test_a_plan_nobody_stands_behind_gives_way_to_a_new_range(ledger):
+    c, base = two_days(ledger)
+    marked = mark(c, base, "c", "a").json()["data"]
+    assert (
+        c.post(
+            base + "/payer-marks/" + marked["id"] + "/revoke", headers=auth("c")
+        ).status_code
+        == 200
+    )
+
+    assert scope(c, base, [D1])["conflicts"] == []
+    assert confirm(c, base, "b", "a", [D1]).status_code == 201

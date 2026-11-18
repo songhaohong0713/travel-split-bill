@@ -18,7 +18,7 @@ def applied(net, transfers):
             rows = transfer[key]
             assert len({row["date"] for row in rows}) == len(rows)
             signed = Decimal(transfer["amount"]) * (1 if key == "allocations" else -1)
-            assert sum(Decimal(row["amount"]) for row in rows) == signed
+            assert sum((Decimal(row["amount"]) for row in rows), Decimal(0)) == signed
             for row in rows:
                 left[row["date"]][member] -= Decimal(row["amount"])
     return left
@@ -76,11 +76,6 @@ def test_balanced_ranges_are_cleared_on_every_day_for_every_member():
         for day in DAYS[: rng.randint(1, 4)]:
             values = [Decimal(rng.randint(-500, 500)) for _ in members[1:]]
             net[day] = dict(zip(members, [-sum(values), *values]))
-        # A member whose days cancel out to exactly zero takes part in no
-        # transfer; how those days get settled is an open product question.
-        if any(not sum(net[day][m] for day in net) for m in members):
-            continue
-
         left = applied(net, _plan_transfers("CNY", net))
 
         assert all(not value for values in left.values() for value in values.values())
@@ -93,3 +88,29 @@ def test_only_the_part_that_balances_gets_transfers():
 
     assert [t["amount"] for t in transfers] == ["110.00"]
     assert applied(net, transfers) == {DAYS[0]: {"a": Decimal(10), "c": Decimal(0)}}
+
+
+def test_member_whose_days_cancel_out_gets_an_offset():
+    net = {
+        DAYS[0]: {"a": Decimal(100), "b": Decimal(-100)},
+        DAYS[1]: {"a": Decimal(-100), "c": Decimal(100)},
+    }
+
+    transfer, cancel = _plan_transfers("CNY", net)
+
+    assert (transfer["from_participant_id"], transfer["to_participant_id"]) == (
+        "b",
+        "c",
+    )
+    assert cancel == {
+        "currency": "CNY",
+        "amount": "0.00",
+        "from_participant_id": None,
+        "to_participant_id": "a",
+        "allocations": [
+            {"date": DAYS[0], "amount": "100.00"},
+            {"date": DAYS[1], "amount": "-100.00"},
+        ],
+        "payer_allocations": [],
+        "offset_only": True,
+    }

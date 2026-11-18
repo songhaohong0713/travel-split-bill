@@ -26,6 +26,7 @@ from app.core.money import quantized_money
 from app.core.settlement import minimum_transfers
 
 FORMAT_VERSION = 2
+VERSIONED = {"format_version": FORMAT_VERSION}
 TRANSFER_IDENTITY = (
     "currency",
     "amount",
@@ -159,14 +160,11 @@ def _member_dates(members, payment):
             a["date"] for a in payment["allocations"] + payment.get("freeze_basis", [])
         }
         return dict.fromkeys(members, dates)
-    touched = {
-        payment["to_participant_id"]: {a["date"] for a in payment["allocations"]},
-        payment["from_participant_id"]: {
-            a["date"] for a in payment["payer_allocations"]
-        },
-    }
+    touched = {}
+    for day, member, _ in _deductions(members, payment):
+        touched.setdefault(member, set()).add(day)
     for basis in payment["freeze_basis"]:
-        touched[basis["participant_id"]].add(basis["date"])
+        touched.setdefault(basis["participant_id"], set()).add(basis["date"])
     return touched
 
 
@@ -409,6 +407,7 @@ def _plan_transfers(currency, net):
     for day in days:
         for member, value in work[day].items():
             totals[member] = totals.get(member, Decimal(0)) + value
+    idle = sorted(member for member, total in totals.items() if not total)
     transfers = []
     for transfer in minimum_transfers(dict(totals), currency):
         value = Decimal(transfer.amount.amount)
@@ -422,41 +421,151 @@ def _plan_transfers(currency, net):
                 "from_participant_id": payer,
                 "to_participant_id": payee,
                 "allocations": _take(work, days, currency, payee, value, totals),
-                "payer_allocations": _take(
-                    work, days, currency, payer, -value, totals
-                ),
+                "payer_allocations": _take(work, days, currency, payer, -value, totals),
             }
         )
+    # Days that cancel out for one member move no money, but they still have
+    # to be closed: an offset any member can confirm.
+    for member in idle:
+        rows = _take(work, days, currency, member, Decimal(0), totals)
+        if rows:
+            transfers.append(
+                {
+                    "currency": currency,
+                    "amount": amount(currency, Decimal(0)),
+                    "from_participant_id": None,
+                    "to_participant_id": member,
+                    "allocations": rows,
+                    "payer_allocations": [],
+                    "offset_only": True,
+                }
+            )
     return transfers
 
 
-def _plan_payments(snapshot, plan):
+def _active_payments(snapshot, plan_ids):
     return [
         p
         for p in snapshot["state"]["payments"]
-        if not p.get("revoked_at") and p.get("plan_id") == plan["id"]
+        if not p.get("revoked_at") and p.get("plan_id") in plan_ids
     ]
 
 
-def _plan_holds(snapshot, by_date, plan):
-    """A fixed plan stands while balances only moved by its own settlements."""
-    expected = {
+def _open_transfers(snapshot, plan):
+    settled = {
+        (p["from_participant_id"], p["to_participant_id"])
+        for p in _active_payments(snapshot, {plan["id"]})
+    }
+    return [
+        t
+        for t in plan["transfers"]
+        if (t["from_participant_id"], t["to_participant_id"]) not in settled
+    ]
+
+
+def _plan_claim(snapshot, by_date, plan):
+    """What a fixed plan still has to settle per day, or None once it broke.
+
+    A plan stands while balances only moved by its own settlements. One built
+    around earlier plans' open transfers (`includes`) owns just what those
+    leave, so their open transfers are set aside before comparing.
+    """
+    currency = plan["currency"]
+    members = sorted(snapshot["members"])
+    claim = {
         day: {member: Decimal(value) for member, value in net.items()}
         for day, net in plan["basis"].items()
     }
-    members = sorted(snapshot["members"])
-    for payment in _plan_payments(snapshot, plan):
+    for payment in _active_payments(snapshot, {plan["id"]}):
         for day, member, value in _deductions(members, payment):
-            net = expected.setdefault(day, {})
+            net = claim.setdefault(day, {})
             net[member] = net.get(member, Decimal(0)) - value
-    for day, net in expected.items():
-        current = _day_net(by_date[day], plan["currency"]) if day in by_date else {}
-        if any(
-            current.get(member, Decimal(0)) != net.get(member, Decimal(0))
-            for member in set(current) | set(net)
+    current = {
+        day: _day_net(by_date[day], currency) if day in by_date else {} for day in claim
+    }
+    stored = {p["id"]: p for p in snapshot["state"].get("plans", [])}
+    for included in plan.get("includes", []):
+        if (
+            included not in stored
+            or _plan_claim(snapshot, by_date, stored[included]) is None
         ):
-            return False
-    return True
+            return None
+        for transfer in _open_transfers(snapshot, stored[included]):
+            for day, member, value in _deductions([], transfer | VERSIONED):
+                if day in current:
+                    net = current[day]
+                    net[member] = net.get(member, Decimal(0)) - value
+    for day, net in claim.items():
+        if any(
+            current[day].get(member, Decimal(0)) != net.get(member, Decimal(0))
+            for member in set(current[day]) | set(net)
+        ):
+            return None
+    return {day: net for day, net in claim.items() if any(net.values())}
+
+
+def _is_backed(snapshot, plan):
+    """Someone marked or confirmed a transfer of this plan and none was undone."""
+    return bool(_active_payments(snapshot, {plan["id"]})) or any(
+        m.get("plan_id") == plan["id"]
+        and not m.get("revoked_at")
+        and not m.get("confirmed_payment_id")
+        for m in snapshot["state"].get("payer_marks", [])
+    )
+
+
+def _currency_scope(snapshot, by_date, currency, net):
+    """Plans covering one currency of a range, oldest first, and conflicts.
+
+    Open transfers of a plan someone stands behind are kept as they are and
+    only what they leave is paired anew. A range that cuts through such a plan
+    cannot keep it whole, so it is reported as a conflict instead.
+    """
+    live = set(net)
+    kept, conflicts, unclaimed = [], [], None
+    for plan in snapshot["state"].get("plans", []):
+        if plan["currency"] != currency:
+            continue
+        claim = _plan_claim(snapshot, by_date, plan)
+        if not claim or not set(claim) & live:
+            continue
+        if not _is_backed(snapshot, plan):
+            # Nobody stands behind it: reused only for exactly its own range.
+            unclaimed = plan if set(claim) == live else unclaimed
+        elif set(claim) <= live:
+            kept.append(plan)
+        else:
+            conflicts.append({"currency": currency, "dates": sorted(claim)})
+    if conflicts:
+        kept = []
+    elif not kept and unclaimed:
+        kept = [unclaimed]
+    rest = {day: dict(values) for day, values in net.items()}
+    for plan in kept:
+        for transfer in _open_transfers(snapshot, plan):
+            for day, member, value in _deductions([], transfer | VERSIONED):
+                rest[day][member] = rest[day].get(member, Decimal(0)) - value
+    rest = {
+        day: {m: v for m, v in values.items() if v}
+        for day, values in rest.items()
+        if any(values.values())
+    }
+    fresh = _plan_transfers(currency, rest)
+    if fresh or not kept:
+        kept.append(
+            {
+                "id": None,
+                "currency": currency,
+                "dates": sorted(rest),
+                "basis": {
+                    day: {m: amount(currency, v) for m, v in sorted(values.items())}
+                    for day, values in rest.items()
+                },
+                "includes": [p["id"] for p in kept],
+                "transfers": fresh,
+            }
+        )
+    return kept, conflicts
 
 
 def _selected_days(snapshot, requested_dates, ledger):
@@ -535,52 +644,33 @@ def settlement_scope(snapshot, requested_dates=None, *, ledger=None):
             "token": token,
             "plans": [],
         }
-    plans = []
-    transfers = []
-    for currency in sorted({b["currency"] for d in selected for b in by_date[d]["balances"]}):
+    plans, transfers, conflicts = [], [], []
+    for currency in sorted(
+        {b["currency"] for day in selected for b in by_date[day]["balances"]}
+    ):
         net = {
             day: _day_net(by_date[day], currency)
             for day in selected
             if _day_net(by_date[day], currency)
         }
-        # Once a range has a fixed plan its open transfers are never re-paired.
-        plan = next(
-            (
-                p
-                for p in reversed(snapshot["state"].get("plans", []))
-                if p["currency"] == currency
-                and {
-                    day
-                    for day in p["dates"]
-                    if day in by_date and _day_net(by_date[day], currency)
-                }
-                == set(net)
-                and _plan_holds(snapshot, by_date, p)
-            ),
-            None,
-        )
-        if plan is None:
-            plan = {
-                "id": None,
-                "currency": currency,
-                "dates": sorted(net),
-                "basis": {
-                    day: {m: amount(currency, v) for m, v in sorted(values.items())}
-                    for day, values in net.items()
-                },
-                "transfers": _plan_transfers(currency, net),
-            }
-        settled = {
-            (p["from_participant_id"], p["to_participant_id"])
-            for p in (_plan_payments(snapshot, plan) if plan["id"] else [])
-        }
-        plans.append(plan)
-        transfers += [
-            t
-            for t in plan["transfers"]
-            if (t["from_participant_id"], t["to_participant_id"]) not in settled
-        ]
-    return {"dates": selected, "transfers": transfers, "token": token, "plans": plans}
+        kept, blocked = _currency_scope(snapshot, by_date, currency, net)
+        conflicts += blocked
+        for plan in kept:
+            # Each row keeps a link to its plan; fixing a plan fills in the id.
+            plan = {**plan, "open": []}
+            plans.append(plan)
+            for transfer in (
+                _open_transfers(snapshot, plan) if plan["id"] else plan["transfers"]
+            ):
+                plan["open"].append({**transfer, "plan_id": plan["id"]})
+            transfers += plan["open"]
+    return {
+        "dates": selected,
+        "transfers": transfers,
+        "conflicts": conflicts,
+        "token": token,
+        "plans": plans,
+    }
 
 
 def payment_preview(snapshot, requested_dates=None, *, ledger=None):
@@ -588,34 +678,43 @@ def payment_preview(snapshot, requested_dates=None, *, ledger=None):
     return {key: value for key, value in scope.items() if key != "plans"}
 
 
-def find_transfer(scope, currency, payer=None, payee=None):
+def find_transfer(scope, currency, payer=None, payee=None, *, offset=None, plan=None):
+    """One row of a proposal: a payer/recipient pair, or a member's offset."""
     return next(
         (
             t
             for t in scope["transfers"]
             if t["currency"] == currency
-            and (payer is None or t["from_participant_id"] == payer)
-            and (payee is None or t["to_participant_id"] == payee)
+            and (
+                (t.get("offset_only") and t["to_participant_id"] == offset)
+                if offset is not None
+                else (
+                    (payer is None or t["from_participant_id"] == payer)
+                    and (payee is None or t["to_participant_id"] == payee)
+                )
+            )
+            and (plan is None or t.get("plan_id") == plan)
         ),
         None,
     )
 
 
-def plan_id(scope, currency):
-    return next((p["id"] for p in scope["plans"] if p["currency"] == currency), None)
-
-
 def fix_plans(state, scope, user_id):
     """Store the whole proposal of a range the first time someone acts on it."""
     plans = state.setdefault("plans", [])
-    known = {p["id"] for p in plans}
     for plan in scope["plans"]:
-        if plan["id"] is None:
-            plan["id"] = str(uuid4())
-            plan["created_by"] = user_id
-            plan["created_at"] = datetime.now(UTC).isoformat()
-        if plan["id"] not in known:
-            plans.append(deepcopy(plan))
+        if plan["id"] is not None or not plan["transfers"]:
+            continue
+        plan["id"] = str(uuid4())
+        for transfer in plan["open"]:
+            transfer["plan_id"] = plan["id"]
+        plans.append(
+            {
+                **{k: deepcopy(v) for k, v in plan.items() if k != "open"},
+                "created_by": user_id,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        )
 
 
 def drop_broken_plans(snapshot, state):
@@ -623,7 +722,9 @@ def drop_broken_plans(snapshot, state):
     if not state.get("plans"):
         return
     by_date = {d["date"]: d for d in project(snapshot)["days"]}
-    state["plans"] = [p for p in state["plans"] if _plan_holds(snapshot, by_date, p)]
+    state["plans"] = [
+        p for p in state["plans"] if _plan_claim(snapshot, by_date, p) is not None
+    ]
 
 
 def same_transfer(left, right):
@@ -638,13 +739,9 @@ def mark_is_valid(snapshot, mark, *, ledger=None):
         scope = settlement_scope(snapshot, mark["dates"], ledger=ledger)
     except ValueError:
         return False
-    transfer = find_transfer(
-        scope, mark["currency"], mark["from_participant_id"], mark["to_participant_id"]
-    )
-    return (
-        transfer is not None
-        and same_transfer(transfer, mark)
-        and mark.get("plan_id") == plan_id(scope, mark["currency"])
+    return any(
+        same_transfer(transfer, mark) and transfer.get("plan_id") == mark.get("plan_id")
+        for transfer in scope["transfers"]
     )
 
 
@@ -673,7 +770,7 @@ def annotate_transfers(snapshot, ledger):
     for transfer in open_transfers:
         dates = _transfer_dates(transfer)
         if not any(
-            same_pair(transfer, m) and set(dates) & set(_transfer_dates(m))
+            same_transfer(transfer, m) and transfer.get("plan_id") == m.get("plan_id")
             for m in marked
         ):
             rows.append({"status": "pending"} | _transfer_row(transfer, dates))
@@ -742,7 +839,7 @@ def member_settlement(snapshot, transfer):
         }
         for day, member in sorted(frozen)
     ]
-    touched = _member_dates(members, {**transfer, "freeze_basis": basis, "format_version": FORMAT_VERSION})
+    touched = _member_dates(members, transfer | VERSIONED | {"freeze_basis": basis})
     depends_on = [
         payment["id"]
         for payment in snapshot["state"]["payments"]
