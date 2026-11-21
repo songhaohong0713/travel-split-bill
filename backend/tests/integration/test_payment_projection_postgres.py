@@ -1,29 +1,14 @@
-"""The deployed payment projection trigger, run against a real PostgreSQL.
-
-Skipped unless TSB_TEST_POSTGRES_URL points at a server where this test may
-create and drop a scratch database, e.g. postgresql://postgres@127.0.0.1:5432.
-"""
+"""The deployed payment projection trigger, run against a real PostgreSQL."""
 
 import json
-import os
-import subprocess
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
+from postgres_scratch import requires_postgres, scratch_database
 
-SERVER = os.environ.get("TSB_TEST_POSTGRES_URL")
-pytestmark = pytest.mark.skipif(not SERVER, reason="TSB_TEST_POSTGRES_URL not set")
+pytestmark = requires_postgres
 MIGRATIONS = Path("cloudbase/migrations")
 STUBS = """
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN
-    CREATE ROLE service_role; END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN
-    CREATE ROLE anon; END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN
-    CREATE ROLE authenticated; END IF;
-END $$;
 CREATE TABLE public.users (id varchar(36) PRIMARY KEY);
 CREATE TABLE public.trips (id varchar(36) PRIMARY KEY);
 CREATE TABLE public.trip_ledgers (
@@ -72,26 +57,8 @@ def projection_ddl():
 
 @pytest.fixture
 def psql():
-    name = "tsb_" + uuid4().hex
-
-    def run(sql, database=name, check=True):
-        result = subprocess.run(
-            ["psql", f"{SERVER}/{database}", "-v", "ON_ERROR_STOP=1", "-Atq"],
-            input=sql,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if check:
-            assert result.returncode == 0, result.stderr
-        return result
-
-    run(f"CREATE DATABASE {name}", "postgres")
-    try:
-        run(STUBS + projection_ddl())
+    with scratch_database(STUBS + projection_ddl()) as run:
         yield run
-    finally:
-        run(f"DROP DATABASE {name} WITH (FORCE)", "postgres")
 
 
 def commit(run, payments, check=True):

@@ -3,11 +3,12 @@
 import json
 from decimal import Decimal
 
+from app.core.limits import MAX_TRIP_MEMBERS
 from app.core.money import currency_scale, decimal_from_string, quantize_decimal
 from app.core.settlement import calculate_grouped_settlement
 
-# A trip holds at most six members and an expense may involve all of them.
-MAX_PARTICIPANTS = 6
+# An expense may involve every member of the trip.
+MAX_PARTICIPANTS = MAX_TRIP_MEMBERS
 
 
 def validate_expense_payload(
