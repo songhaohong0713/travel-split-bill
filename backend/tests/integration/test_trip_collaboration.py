@@ -117,7 +117,7 @@ def test_invited_user_can_join_list_and_edit_trip(client: TestClient) -> None:
     ]
 
 
-def test_trip_invite_can_only_be_accepted_once(client: TestClient) -> None:
+def test_trip_invite_can_be_accepted_by_several_people(client: TestClient) -> None:
     trip_id = create_trip(client)
     token = client.post(f"/v1/trips/{trip_id}/invites", headers=auth("owner-a")).json()[
         "data"
@@ -130,10 +130,11 @@ def test_trip_invite_can_only_be_accepted_once(client: TestClient) -> None:
         == 200
     )
     repeated = client.post(f"/v1/trip-invites/{token}/accept", headers=auth("third-c"))
-    assert repeated.status_code == 410
+    assert repeated.status_code == 200
+    assert repeated.json()["data"]["member_count"] == 3
 
 
-def test_third_user_cannot_read_or_join_full_trip(client: TestClient) -> None:
+def test_outsider_cannot_read_a_trip(client: TestClient) -> None:
     trip_id = create_trip(client)
     token = client.post(f"/v1/trips/{trip_id}/invites", headers=auth("owner-a")).json()[
         "data"

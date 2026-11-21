@@ -22,3 +22,14 @@ For multi-member settlement, apply `20261119010000_offset_settlement.sql` before
 deploying the matching backend. It only makes `payment_records.from_id`
 nullable, so that an offset (one member's days cancelling out, amount 0, no
 payer) can be projected. Existing rows and the projection trigger are unchanged.
+
+For trips of up to six members, apply `20261121010000_trip_member_limit.sql`
+together with the matching backend, and not before the multi-member settlement
+backend is live: until then a three-member trip cannot be previewed or settled.
+It rebuilds `tsb_create_trip_invite` and `tsb_accept_trip_invite` with
+`CREATE OR REPLACE`; their previous definitions live in `infra/cloudbase`
+(`20260919_trip_collaboration.sql`, `20260929_collaboration_permissions.sql`),
+and this file is now the current one. The limit rises from 2 to 6, one invite
+link admits several members until it expires, is replaced or the trip is full,
+and accepting returns the real member count. Links already used under the
+single-use rule stay expired. No table or data changes.

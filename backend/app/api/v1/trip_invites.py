@@ -14,6 +14,7 @@ from app.api.v1.trips import (
     _not_found,
     require_trip_owner,
 )
+from app.core.limits import MAX_TRIP_MEMBERS
 from app.db.models import Trip, TripInvite, TripMember, User
 from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
@@ -38,10 +39,22 @@ def _expired() -> HTTPException:
     )
 
 
+def _member_count(session: DbSession, trip_id: str) -> int:
+    return (
+        session.scalar(
+            select(func.count(TripMember.id)).where(TripMember.trip_id == trip_id)
+        )
+        or 0
+    )
+
+
 def _full() -> HTTPException:
     return HTTPException(
         status_code=409,
-        detail={"code": "TRIP_MEMBER_LIMIT_REACHED", "message": "这段旅行已有两位成员"},
+        detail={
+            "code": "TRIP_MEMBER_LIMIT_REACHED",
+            "message": f"这段旅行已满 {MAX_TRIP_MEMBERS} 人",
+        },
     )
 
 
@@ -64,7 +77,11 @@ async def create_trip_invite(
                     "p_expires_at": expires_at.isoformat(),
                 },
             )
-        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
@@ -72,12 +89,7 @@ async def create_trip_invite(
             raise _full()
         return {"data": {"token": token, "expires_at": str(result["expires_at"])}}
     require_trip_owner(session, trip_id, user_id)
-    if (
-        session.scalar(
-            select(func.count(TripMember.id)).where(TripMember.trip_id == trip_id)
-        )
-        or 0
-    ) >= 2:
+    if _member_count(session, trip_id) >= MAX_TRIP_MEMBERS:
         raise _full()
     now = _now()
     session.execute(
@@ -119,7 +131,11 @@ async def get_trip_invite(
                     "limit": "1",
                 },
             )
-        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(rows, list) or not rows:
             raise _expired()
@@ -172,7 +188,11 @@ async def get_trip_invite(
                 if isinstance(names, list) and names and isinstance(names[0], dict)
                 else None
             )
-        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
             raise _cloudbase_error(exc) from exc
         return {
             "data": {
@@ -230,7 +250,11 @@ async def accept_trip_invite(
                 "tsb_accept_trip_invite",
                 {"p_token_hash": _hash(token), "p_user_id": user_id},
             )
-        except (CloudBasePgConfigurationError, CloudBasePgRequestError, CloudBasePgUnavailable) as exc:
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("expired"):
             raise _expired()
@@ -245,6 +269,8 @@ async def accept_trip_invite(
     invite = session.scalar(
         select(TripInvite).where(TripInvite.token_hash == _hash(token))
     )
+    # `used_at` is only set on links consumed under the former single-use rule;
+    # those stay dead.
     if (
         invite is None
         or invite.used_at is not None
@@ -264,27 +290,20 @@ async def accept_trip_invite(
             status_code=409,
             detail={"code": "ALREADY_A_MEMBER", "message": "你已经加入这段旅行"},
         )
-    if (
-        session.scalar(
-            select(func.count(TripMember.id)).where(
-                TripMember.trip_id == invite.trip_id
-            )
-        )
-        or 0
-    ) >= 2:
+    if _member_count(session, invite.trip_id) >= MAX_TRIP_MEMBERS:
         raise _full()
     trip = session.get(Trip, invite.trip_id)
     if trip is None:
         raise _not_found()
     _ensure_user(session, user_id)
+    # The link stays usable until it expires, is replaced or the trip is full.
     session.add(TripMember(trip_id=trip.id, user_id=user_id))
-    invite.used_at = _now()
     session.commit()
     return {
         "data": {
             "id": trip.id,
             "name": trip.name,
             "default_currency": trip.default_currency,
-            "member_count": 2,
+            "member_count": _member_count(session, trip.id),
         }
     }
