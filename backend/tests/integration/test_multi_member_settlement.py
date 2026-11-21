@@ -653,3 +653,50 @@ def test_a_plan_nobody_stands_behind_gives_way_to_a_new_range(ledger):
 
     assert scope(c, base, [D1])["conflicts"] == []
     assert confirm(c, base, "b", "a", [D1]).status_code == 201
+
+
+def test_adjustment_rolling_into_today_leaves_a_remainder_until_tomorrow(ledger):
+    from datetime import UTC, datetime, timedelta
+
+    today = datetime.now(UTC).date()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    c, base = ledger
+    join(base, "c")
+    saved, body = spend(c, base, {"a": "100", "b": "100", "c": "100"}, day=yesterday)
+    assert confirm(c, base, "b", "a").status_code == 201
+
+    respend(c, base, saved, body, {"a": "110", "b": "110", "c": "110"})
+
+    # b's extra 10 lands on today, which cannot be settled yet.
+    data, days = view(c, base)
+    assert days[today.isoformat()]["status"] == "recording"
+    assert [
+        (e["participant_id"], e["signed_amount"])
+        for e in days[today.isoformat()]["carry_entries"]
+    ] == [("b", "-10.00")]
+    assert pairs(data["summary"]) == [("c", "a", "110.00")]
+    assert confirm(c, base, "c", "a").status_code == 201
+    data, days = view(c, base)
+    assert days[yesterday]["status"] == "pending"
+    assert days[yesterday]["balances"] == [
+        {"currency": "CNY", "participant_id": "a", "amount": "10.00"}
+    ]
+    assert data["summary"] == []
+    summary = c.get("/v1/trips/ledger-summary", headers=auth()).json()["data"]
+    assert summary["trips"][0]["pending"] == []
+    assert summary["trips"][0]["pending_days"] == 1
+
+
+def test_third_member_may_edit_but_not_delete_someone_elses_expense(ledger):
+    c, base = ledger
+    join(base, "c")
+    saved, body = spend(c, base, {"a": "100", "b": "100", "c": "100"})
+    path = base + "/expenses/" + saved["id"]
+
+    body["payload"]["title"] = "改过的晚餐"
+    edited = c.patch(path, headers=auth("c"), json={**body, "revision": 1})
+
+    assert edited.status_code == 200, edited.text
+    assert c.delete(path, headers=auth("c")).status_code == 404
+    assert c.delete(path, headers=auth("b")).status_code == 404
+    assert c.delete(path, headers=auth()).status_code == 204
