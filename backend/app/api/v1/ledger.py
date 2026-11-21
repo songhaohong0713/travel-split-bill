@@ -23,11 +23,11 @@ from app.core.ledger import (
     drop_broken_plans,
     find_transfer,
     fix_plans,
+    mark_matches,
     member_settlement,
     payment_preview,
     project,
     same_pair,
-    same_transfer,
     settlement_basis,
     settlement_scope,
     snapshot_token,
@@ -77,6 +77,8 @@ async def ledger_summary(request: Request, session: DbSession, user_id: CurrentU
             logger.exception("ledger summary failed for trip %s", trip_id)
             summary = {**EMPTY_SUMMARY, "id": trip_id}
         for transfer in summary["pending"]:
+            if transfer["direction"] == "offset":
+                continue
             total = totals.setdefault(
                 transfer["currency"],
                 {"receivable": Decimal(0), "payable": Decimal(0)},
@@ -119,11 +121,14 @@ def trip_summary(trip_id, old, user_id):
         transfers = payment_preview(old, ledger=ledger)["transfers"]
     return {
         "id": trip_id,
-        # Transfers between other members are not this user's money.
+        # Transfers between other members are not this user's money. An offset
+        # has no payer: it is neither owed to nor by the member it closes.
         "pending": [
             {
                 **transfer,
-                "direction": "receivable"
+                "direction": "offset"
+                if transfer["from_participant_id"] is None
+                else "receivable"
                 if transfer["to_participant_id"] == user_id
                 else "payable",
             }
@@ -365,14 +370,22 @@ def requested_transfer(old, body):
                 "message": "这些日期已有人标记付款或确认收款，请先处理："
                 + "、".join(dates),
                 "dates": dates,
+                # Member ids; the client shows their names.
+                "marked_by": sorted({u for c in blocked for u in c["marked_by"]}),
+                "confirmed_by": sorted({u for c in blocked for u in c["confirmed_by"]}),
             },
         )
     mark = next(
         (m for m in old["state"].get("payer_marks", []) if m["id"] == body.mark_id),
         None,
     )
-    plan = body.plan_id or (mark or {}).get("plan_id")
-    found = find_transfer(scope, body.currency, *pair, offset=offset, plan=plan)
+    if mark is not None and body.plan_id is None:
+        # The mark names its own transfer, also among several of one pair.
+        found = next((t for t in scope["transfers"] if mark_matches(mark, t)), None)
+    else:
+        found = find_transfer(
+            scope, body.currency, *pair, offset=offset, plan=body.plan_id
+        )
     return scope, found, mark
 
 
@@ -401,8 +414,7 @@ async def mark_payment(
         mark is None
         or mark.get("revoked_at")
         or mark.get("confirmed_payment_id")
-        or not same_transfer(mark, group)
-        or mark.get("plan_id") != group.get("plan_id")
+        or not mark_matches(mark, group)
     ):
         raise conflict()
     state = deepcopy(old["state"])
