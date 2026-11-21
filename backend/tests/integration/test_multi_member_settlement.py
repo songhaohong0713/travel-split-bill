@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from app.db.models import TripLedger, TripMember, User
+from app.db.models import PaymentRecord, TripLedger, TripMember, User
 from app.db.session import SessionLocal
 from test_ledger import auth, expense
 from test_ledger import ledger as ledger  # noqa: PLC0414
@@ -542,6 +542,21 @@ def test_members_whose_days_cancel_out_get_an_offset_each(ledger):
     assert first.status_code == 201, first.text
     assert first.json()["data"]["format_version"] == 2
     assert first.json()["data"]["from_participant_id"] is None
+    with SessionLocal() as session:
+        row = session.get(PaymentRecord, first.json()["data"]["id"])
+        assert (row.from_id, row.to_id, row.amount) == (None, "a", 0)
+    # Nobody pays or receives: the home summary shows it as neither.
+    home = c.get("/v1/trips/ledger-summary", headers=auth("b")).json()["data"]
+    assert home["groups"] == []
+    assert [(t["direction"], t["amount"]) for t in home["trips"][0]["pending"]] == [
+        ("offset", "0.00")
+    ]
+    assert (
+        c.get("/v1/trips/ledger-summary", headers=auth("c")).json()["data"]["trips"][0][
+            "pending"
+        ]
+        == []
+    )
     _, days = view(c, base)
     assert {d: days[d]["status"] for d in days} == {D1: "pending", D2: "pending"}
     assert offset(c, base, "b", by="a").status_code == 201
@@ -627,11 +642,18 @@ def test_range_cutting_through_a_marked_plan_cannot_be_settled(ledger):
 
     part = scope(c, base, [D1])
 
-    assert part["conflicts"] == [{"currency": "CNY", "dates": [D1, D2]}]
+    assert part["conflicts"] == [
+        {"currency": "CNY", "dates": [D1, D2], "marked_by": ["c"], "confirmed_by": []}
+    ]
     blocked = confirm(c, base, "b", "a", [D1])
     assert blocked.status_code == 409
-    assert blocked.json()["error"]["code"] == "MARKED_TRANSFER_PENDING"
-    assert blocked.json()["error"]["dates"] == [D1, D2]
+    error = blocked.json()["error"]
+    assert error["code"] == "MARKED_TRANSFER_PENDING"
+    # Enough to send the user to the right days and the right person.
+    assert error["dates"] == [D1, D2]
+    assert error["marked_by"] == ["c"]
+    assert error["confirmed_by"] == []
+    assert D1 in error["message"] and D2 in error["message"]
     assert mark(c, base, "b", "a", [D1]).status_code == 409
     assert view(c, base)[0]["payments"] == []
     # The whole range is still open, exactly as it was marked.
@@ -653,3 +675,164 @@ def test_a_plan_nobody_stands_behind_gives_way_to_a_new_range(ledger):
 
     assert scope(c, base, [D1])["conflicts"] == []
     assert confirm(c, base, "b", "a", [D1]).status_code == 201
+
+
+def test_adjustment_rolling_into_today_leaves_a_remainder_until_tomorrow(ledger):
+    from datetime import UTC, datetime, timedelta
+
+    today = datetime.now(UTC).date()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    c, base = ledger
+    join(base, "c")
+    saved, body = spend(c, base, {"a": "100", "b": "100", "c": "100"}, day=yesterday)
+    assert confirm(c, base, "b", "a").status_code == 201
+
+    respend(c, base, saved, body, {"a": "110", "b": "110", "c": "110"})
+
+    # b's extra 10 lands on today, which cannot be settled yet.
+    data, days = view(c, base)
+    assert days[today.isoformat()]["status"] == "recording"
+    assert [
+        (e["participant_id"], e["signed_amount"])
+        for e in days[today.isoformat()]["carry_entries"]
+    ] == [("b", "-10.00")]
+    assert pairs(data["summary"]) == [("c", "a", "110.00")]
+    assert confirm(c, base, "c", "a").status_code == 201
+    data, days = view(c, base)
+    assert days[yesterday]["status"] == "pending"
+    assert days[yesterday]["balances"] == [
+        {"currency": "CNY", "participant_id": "a", "amount": "10.00"}
+    ]
+    assert data["summary"] == []
+    summary = c.get("/v1/trips/ledger-summary", headers=auth()).json()["data"]
+    assert summary["trips"][0]["pending"] == []
+    assert summary["trips"][0]["pending_days"] == 1
+
+
+def test_third_member_may_edit_but_not_delete_someone_elses_expense(ledger):
+    c, base = ledger
+    join(base, "c")
+    saved, body = spend(c, base, {"a": "100", "b": "100", "c": "100"})
+    path = base + "/expenses/" + saved["id"]
+
+    body["payload"]["title"] = "改过的晚餐"
+    edited = c.patch(path, headers=auth("c"), json={**body, "revision": 1})
+
+    assert edited.status_code == 200, edited.text
+    assert c.delete(path, headers=auth("c")).status_code == 404
+    assert c.delete(path, headers=auth("b")).status_code == 404
+    assert c.delete(path, headers=auth()).status_code == 204
+
+
+def test_mark_made_as_a_pair_stays_valid_when_a_third_member_joins(ledger):
+    c, base = ledger
+    expense(c, base)
+    p = scope(c, base)
+    marked = c.post(
+        base + "/payments/mark-paid",
+        headers=auth("b"),
+        json={"dates": p["dates"], "token": p["token"], "currency": "CNY"},
+    ).json()["data"]
+
+    join(base, "c")
+
+    data, days = view(c, base)
+    assert data["payer_marks"][0]["stale"] is False
+    assert [(*pairs([t]), t["status"]) for t in days[D1]["transfers"]] == [
+        (("b", "a", "200.00"), "marked")
+    ]
+    paid = confirm(c, base, "b", "a", mark_id=marked["id"])
+    assert paid.status_code == 201, paid.text
+    assert paid.json()["data"]["format_version"] == 2
+    data, days = view(c, base)
+    assert data["payer_marks"][0]["confirmed_payment_id"] == paid.json()["data"]["id"]
+    assert days[D1]["status"] == "settled"
+
+
+def test_pair_mark_goes_stale_once_the_new_member_changes_the_amount(ledger):
+    c, base = ledger
+    expense(c, base)
+    p = scope(c, base)
+    marked = c.post(
+        base + "/payments/mark-paid",
+        headers=auth("b"),
+        json={"dates": p["dates"], "token": p["token"], "currency": "CNY"},
+    ).json()["data"]
+    join(base, "c")
+
+    spend(c, base, {"b": "50", "c": "50"}, payer="a")
+
+    assert view(c, base)[0]["payer_marks"][0]["stale"] is True
+    assert confirm(c, base, "b", "a", mark_id=marked["id"]).status_code == 409
+
+
+def yen(c, base, people):
+    body = {
+        "occurred_at": D1,
+        "payload": {
+            "title": "拉面",
+            "participants": people,
+            "expenses": [
+                {
+                    "expense_id": str(uuid4()),
+                    "payer_id": "a",
+                    "settlement_currency": "JPY",
+                    "items": [
+                        {
+                            "item_id": person,
+                            "amount": {"currency": "JPY", "amount": "1000"},
+                            "allocation": {person: "1"},
+                        }
+                        for person in people
+                    ],
+                }
+            ],
+        },
+    }
+    r = c.post(
+        base + "/expenses",
+        headers={**auth(), "Idempotency-Key": str(uuid4())},
+        json=body,
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_new_currency_on_a_settled_two_member_day_rolls_to_the_next_day(ledger):
+    c, base = ledger
+    expense(c, base)
+    p = scope(c, base)
+    body = {"dates": p["dates"], "token": p["token"], "currency": "CNY"}
+    assert c.post(base + "/payments", headers=auth(), json=body).status_code == 201
+
+    yen(c, base, ["a", "b"])
+
+    _, days = view(c, base)
+    assert days[D1]["status"] == "settled"
+    assert days[D1]["balances"] == []
+    assert [(e["currency"], e["source_date"]) for e in days[D2]["carry_entries"]] == [
+        ("JPY", D1)
+    ]
+    assert pairs(scope(c, base)["transfers"]) == [("b", "a", "1000")]
+
+
+def test_new_currency_on_a_settled_multi_member_day_reopens_that_day(ledger):
+    c, base, _, _ = three(ledger)
+    assert confirm(c, base, "b", "a").status_code == 201
+    assert confirm(c, base, "c", "a").status_code == 201
+    assert view(c, base)[1][D1]["status"] == "settled"
+
+    yen(c, base, ["a", "b", "c"])
+
+    _, days = view(c, base)
+    assert list(days) == [D1]
+    assert days[D1]["status"] == "pending"
+    assert days[D1]["carry_entries"] == []
+    assert [(b["currency"], b["participant_id"]) for b in days[D1]["balances"]] == [
+        ("JPY", "a"),
+        ("JPY", "b"),
+        ("JPY", "c"),
+    ]
+    assert pairs(scope(c, base)["transfers"]) == [
+        ("b", "a", "1000"),
+        ("c", "a", "1000"),
+    ]

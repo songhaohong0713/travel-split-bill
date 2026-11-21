@@ -504,13 +504,20 @@ def _plan_claim(snapshot, by_date, plan):
     return {day: net for day, net in claim.items() if any(net.values())}
 
 
-def _is_backed(snapshot, plan):
-    """Someone marked or confirmed a transfer of this plan and none was undone."""
-    return bool(_active_payments(snapshot, {plan["id"]})) or any(
-        m.get("plan_id") == plan["id"]
+def _open_marks(snapshot, plan):
+    return [
+        m
+        for m in snapshot["state"].get("payer_marks", [])
+        if m.get("plan_id") == plan["id"]
         and not m.get("revoked_at")
         and not m.get("confirmed_payment_id")
-        for m in snapshot["state"].get("payer_marks", [])
+    ]
+
+
+def _is_backed(snapshot, plan):
+    """Someone marked or confirmed a transfer of this plan and none was undone."""
+    return bool(_active_payments(snapshot, {plan["id"]})) or bool(
+        _open_marks(snapshot, plan)
     )
 
 
@@ -535,7 +542,21 @@ def _currency_scope(snapshot, by_date, currency, net):
         elif set(claim) <= live:
             kept.append(plan)
         else:
-            conflicts.append({"currency": currency, "dates": sorted(claim)})
+            conflicts.append(
+                {
+                    "currency": currency,
+                    "dates": sorted(claim),
+                    "marked_by": sorted(
+                        {m["marked_by"] for m in _open_marks(snapshot, plan)}
+                    ),
+                    "confirmed_by": sorted(
+                        {
+                            p["created_by"]
+                            for p in _active_payments(snapshot, {plan["id"]})
+                        }
+                    ),
+                }
+            )
     if conflicts:
         kept = []
     elif not kept and unclaimed:
@@ -731,6 +752,24 @@ def same_transfer(left, right):
     return all(left.get(key) == right.get(key) for key in TRANSFER_IDENTITY)
 
 
+def mark_matches(mark, transfer):
+    """Whether a payer's mark still stands for a transfer proposed now.
+
+    A mark made while the trip had two members knows neither plans nor
+    per-member allocations. It keeps standing after more members join as long
+    as the same pair still owes the same amount for the same days.
+    """
+    if "payer_allocations" in mark or "payer_allocations" not in transfer:
+        return same_transfer(transfer, mark) and transfer.get("plan_id") == mark.get(
+            "plan_id"
+        )
+    return (
+        same_pair(transfer, mark)
+        and transfer["amount"] == mark["amount"]
+        and _transfer_dates(transfer) == sorted(mark["dates"])
+    )
+
+
 def mark_is_valid(snapshot, mark, *, ledger=None):
     """A mark stands or falls with its own transfer, not with the whole ledger."""
     if mark.get("revoked_at") or mark.get("confirmed_payment_id"):
@@ -739,10 +778,7 @@ def mark_is_valid(snapshot, mark, *, ledger=None):
         scope = settlement_scope(snapshot, mark["dates"], ledger=ledger)
     except ValueError:
         return False
-    return any(
-        same_transfer(transfer, mark) and transfer.get("plan_id") == mark.get("plan_id")
-        for transfer in scope["transfers"]
-    )
+    return any(mark_matches(mark, transfer) for transfer in scope["transfers"])
 
 
 def annotate_transfers(snapshot, ledger):
@@ -769,10 +805,7 @@ def annotate_transfers(snapshot, ledger):
         open_transfers = []
     for transfer in open_transfers:
         dates = _transfer_dates(transfer)
-        if not any(
-            same_transfer(transfer, m) and transfer.get("plan_id") == m.get("plan_id")
-            for m in marked
-        ):
+        if not any(mark_matches(m, transfer) for m in marked):
             rows.append({"status": "pending"} | _transfer_row(transfer, dates))
     for day in ledger["days"]:
         day["transfers"] = [row for row in rows if day["date"] in row["dates"]]
