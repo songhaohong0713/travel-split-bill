@@ -1,5 +1,20 @@
 BEGIN;
 
+-- Historical 2-person invite functions. Once
+-- cloudbase/migrations/20261121010000_trip_member_limit.sql is applied, do not
+-- run this file again: the guard stops it putting those functions back.
+DO $tsb_invite_guard$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc
+    WHERE proname = 'tsb_accept_trip_invite'
+      AND pg_get_functiondef(oid) LIKE '%>= 6 THEN%'
+  ) THEN
+    RAISE EXCEPTION 'TSB_STALE_INVITE_SQL: do not replay this file after cloudbase/migrations/20261121010000_trip_member_limit.sql';
+  END IF;
+END
+$tsb_invite_guard$;
+
 CREATE TABLE IF NOT EXISTS trip_members (
   id text PRIMARY KEY,
   trip_id text NOT NULL REFERENCES trips(id),

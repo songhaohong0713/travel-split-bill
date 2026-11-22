@@ -44,6 +44,7 @@ def scratch_database(setup):
             assert result.returncode == 0, result.stderr
         return result
 
+    run.url = f"{SERVER}/{name}"
     run(f"CREATE DATABASE {name}", "postgres")
     try:
         run(ROLES + setup)

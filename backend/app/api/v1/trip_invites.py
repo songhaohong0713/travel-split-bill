@@ -12,7 +12,6 @@ from app.api.v1.trips import (
     _cloudbase_error,
     _ensure_user,
     _not_found,
-    require_trip_owner,
 )
 from app.core.limits import MAX_TRIP_MEMBERS
 from app.db.models import Trip, TripInvite, TripMember, User
@@ -58,6 +57,34 @@ def _full() -> HTTPException:
     )
 
 
+def _lock_trip(session: DbSession, trip_id: str, owner_id: str | None) -> Trip:
+    """Lock the trip before invite state is trusted.
+
+    Creating a link and joining one both take this lock and then touch
+    trip_invites, matching tsb_create_trip_invite and tsb_accept_trip_invite.
+    PostgreSQL locks with FOR UPDATE. SQLite drops that clause, so the first
+    statement of this transaction updates the trip row and takes the writer
+    lock. A caller that only looked the trip up commits that read first;
+    otherwise SQLite keeps the earlier snapshot.
+    """
+    if session.get_bind().dialect.name == "sqlite":
+        statement = update(Trip).where(Trip.id == trip_id)
+        if owner_id is not None:
+            statement = statement.where(Trip.owner_id == owner_id)
+        session.execute(statement.values(name=Trip.name))
+        trip = session.get(Trip, trip_id)
+        if trip is None or (owner_id is not None and trip.owner_id != owner_id):
+            raise _not_found()
+        return trip
+    statement = select(Trip).where(Trip.id == trip_id)
+    if owner_id is not None:
+        statement = statement.where(Trip.owner_id == owner_id)
+    trip = session.scalar(statement.with_for_update())
+    if trip is None:
+        raise _not_found()
+    return trip
+
+
 @router.post("/trips/{trip_id}/invites", status_code=status.HTTP_201_CREATED)
 async def create_trip_invite(
     trip_id: str, http_request: Request, session: DbSession, user_id: CurrentUser
@@ -88,7 +115,7 @@ async def create_trip_invite(
         if result.get("full"):
             raise _full()
         return {"data": {"token": token, "expires_at": str(result["expires_at"])}}
-    require_trip_owner(session, trip_id, user_id)
+    _lock_trip(session, trip_id, user_id)
     if _member_count(session, trip_id) >= MAX_TRIP_MEMBERS:
         raise _full()
     now = _now()
@@ -266,11 +293,23 @@ async def accept_trip_invite(
                 detail={"code": "ALREADY_A_MEMBER", "message": "你已经加入这段旅行"},
             )
         return {"data": cast(dict[str, object], result)}
+    located = session.execute(
+        select(TripInvite.id, TripInvite.trip_id).where(
+            TripInvite.token_hash == _hash(token)
+        )
+    ).one_or_none()
+    if located is None:
+        raise _expired()
+    invite_id, trip_id = located
+    # End the lookup before locking. SQLite would otherwise keep this snapshot
+    # and miss a revoke that committed while the trip lock was waiting.
+    session.commit()
+    trip = _lock_trip(session, trip_id, None)
     invite = session.scalar(
-        select(TripInvite).where(TripInvite.token_hash == _hash(token))
+        select(TripInvite).where(TripInvite.id == invite_id).with_for_update()
     )
     # `used_at` is only set on links consumed under the former single-use rule;
-    # those stay dead.
+    # those stay dead. Re-read it after the trip lock, with the invite locked.
     if (
         invite is None
         or invite.used_at is not None
@@ -290,11 +329,8 @@ async def accept_trip_invite(
             status_code=409,
             detail={"code": "ALREADY_A_MEMBER", "message": "你已经加入这段旅行"},
         )
-    if _member_count(session, invite.trip_id) >= MAX_TRIP_MEMBERS:
+    if _member_count(session, trip.id) >= MAX_TRIP_MEMBERS:
         raise _full()
-    trip = session.get(Trip, invite.trip_id)
-    if trip is None:
-        raise _not_found()
     _ensure_user(session, user_id)
     # The link stays usable until it expires, is replaced or the trip is full.
     session.add(TripMember(trip_id=trip.id, user_id=user_id))
