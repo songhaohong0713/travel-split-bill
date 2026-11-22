@@ -5,6 +5,25 @@ test('new trip automatically opens skippable invite; native share preserves serv
 test('trip refresh uses day cards; two or more pending dates enable merge count',async()=>{const a=api();a.getLedger=async()=>({members:['a','b'],summary:[{currency:'CNY',amount:'30',to_participant_id:'a'}],payments:[],days:['2026-10-24','2026-10-25'].map(date=>({date,status:'pending',count:1,pending:[]}))});const p=page(a);await p.onLoad({tripId:'t'});assert.equal(p.data.days.length,2);assert.equal(p.data.pendingDays,2);assert.equal(p.data.summary[0].direction,'同行人待付你')})
 test('invited member cannot generate invite',async()=>{const a=api();a.listTrips=async()=>[{id:'t',name:'东京',is_owner:false,member_count:2}];let calls=0;a.createTripInvite=async()=>{calls++};const p=page(a);await p.onLoad({tripId:'t',inviteGuide:'1'});await p.prepareInvite();assert.equal(calls,0)})
 
+test('second member removes the invite entry until stage 6',async()=>{
+  const pageDir=path.join(__dirname,'../pages/trip-detail')
+  assert.match(fs.readFileSync(path.join(pageDir,'index.wxml'),'utf8'),/isOwner && memberCount < 2/)
+  assert.match(fs.readFileSync(path.join(__dirname,'../services/ledger-view.js'),'utf8'),/我和/)
+  const a=api()
+  a.listTrips=async()=>[{id:'t',name:'东京',is_owner:true,member_count:2,default_currency:'CNY'}]
+  a.listTripMembers=async()=>[{id:'a',is_current:true},{id:'b',is_current:false}]
+  a.getLedger=async()=>({members:['a','b'],days:[],summary:[],payments:[]})
+  let calls=0
+  a.createTripInvite=async()=>{calls++;return {token:'x'}}
+  const p=page(a)
+  await p.onLoad({tripId:'t',inviteGuide:'1'})
+  assert.equal(p.data.inviteOpen,false)
+  assert.equal(p.data.memberCount,2)
+  assert.match(p.data.subtitle,/我和同行人/)
+  await p.prepareInvite()
+  assert.equal(calls,0)
+})
+
 test('skipping invite stays skipped on the next visit',async()=>{
  const saved={};const wx={getStorageSync:k=>saved[k],setStorageSync:(k,v)=>saved[k]=v};
  const first=page(api(),wx);await first.onLoad({tripId:'t',inviteGuide:'1'});first.closeInvite();

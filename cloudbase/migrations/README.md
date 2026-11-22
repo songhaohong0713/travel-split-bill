@@ -24,12 +24,24 @@ nullable, so that an offset (one member's days cancelling out, amount 0, no
 payer) can be projected. Existing rows and the projection trigger are unchanged.
 
 For trips of up to six members, apply `20261121010000_trip_member_limit.sql`
-together with the matching backend, and not before the multi-member settlement
-backend is live: until then a three-member trip cannot be previewed or settled.
-It rebuilds `tsb_create_trip_invite` and `tsb_accept_trip_invite` with
-`CREATE OR REPLACE`; their previous definitions live in `infra/cloudbase`
-(`20260919_trip_collaboration.sql`, `20260929_collaboration_permissions.sql`),
-and this file is now the current one. The limit rises from 2 to 6, one invite
-link admits several members until it expires, is replaced or the trip is full,
-and accepting returns the real member count. Links already used under the
+in the same release as the matching backend, and not before the multi-member
+settlement backend is live: until then a three-member trip cannot be previewed
+or settled. It rebuilds `tsb_create_trip_invite` and `tsb_accept_trip_invite`
+with `CREATE OR REPLACE`. The limit rises from 2 to 6, one invite link admits
+several members until it expires, is replaced or the trip is full, and
+accepting returns the real member count. Links already used under the
 single-use rule stay expired. No table or data changes.
+
+The number of members is enforced only inside those two functions. The backend
+reports every `full` result as 「这段旅行已满 6 人」. Deploying the backend while
+the live functions are still the previous ones rejects the third person and
+describes that rejection as a trip that already holds 6. `6` lives in
+`backend/app/core/limits.py` as `MAX_TRIP_MEMBERS`; both functions repeat it,
+and `backend/tests/unit/test_cloudbase_migration_contract.py` checks the copies.
+
+Do not execute `infra/cloudbase/20260919_trip_collaboration.sql` or
+`infra/cloudbase/20260929_collaboration_permissions.sql` after this migration.
+Those files still `CREATE OR REPLACE` the 2-person functions. Replaying either
+one once this migration is applied aborts with `TSB_STALE_INVITE_SQL` and
+leaves the current functions in place. An isolated restore may run them only
+against an empty database, and only before this migration.
