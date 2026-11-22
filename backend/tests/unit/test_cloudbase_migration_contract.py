@@ -60,3 +60,25 @@ def test_collaboration_permissions_allow_trip_members_to_update_any_expense():
     assert "JOIN trip_members m ON m.trip_id=e.trip_id" in update_function
     assert "m.user_id=p_owner_id" in update_function
     assert "e.owner_id=p_owner_id OR t.owner_id=p_owner_id" not in update_function
+
+
+def test_member_limit_migration_rebuilds_both_invite_rpcs():
+    from app.core.limits import MAX_TRIP_MEMBERS
+
+    sql = Path("cloudbase/migrations/20261121010000_trip_member_limit.sql").read_text(
+        encoding="utf-8"
+    )
+    for name in ("tsb_create_trip_invite", "tsb_accept_trip_invite"):
+        body = sql.split(f"CREATE OR REPLACE FUNCTION public.{name}", 1)[1].split(
+            "CREATE OR REPLACE FUNCTION", 1
+        )[0]
+        assert f">= {MAX_TRIP_MEMBERS} THEN" in body
+        assert ">= 2" not in body
+        assert "service_role" in body
+        assert f"GRANT EXECUTE ON FUNCTION public.{name}" in sql
+    accept = sql.split("FUNCTION public.tsb_accept_trip_invite", 1)[1]
+    assert "SET used_at" not in accept
+    assert "'member_count', 2" not in accept
+    assert "owner_id=p_creator_id" in sql
+    readme = Path("cloudbase/migrations/README.md").read_text(encoding="utf-8")
+    assert "20261121010000_trip_member_limit.sql" in readme
