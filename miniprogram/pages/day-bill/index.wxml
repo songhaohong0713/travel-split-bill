@@ -8,7 +8,7 @@
    <text wx:if="{{transferCount && !allSettled && day.status !== 'settled'}}" class="muted block footnote">付款方可标记付款；收到钱后由收款方确认，才算结清。</text>
    <text wx:if="{{scopeMessage}}" class="muted block">{{scopeMessage}}</text>
   </view>
-  <text wx:if="{{timezoneNeedsSetup}}" class="muted block">请旅行创建者在旅行设置中补设结算时区，确保双方日期一致。</text>
+  <text wx:if="{{timezoneNeedsSetup}}" class="muted block">这段旅行还没有设置时区，目前按北京时间划分每一天。旅行创建者可以在旅行设置里改成旅行所在地的时区。</text>
   <view wx:if="{{carriedTo.length}}" class="card"><text class="section-title block">结清后的修改</text><text class="muted block">原转账记录保留，差额记入以下账单</text><view wx:for="{{carriedTo}}" wx:key="date" class="row carry-row" data-date="{{item.date}}" bindtap="openCarry"><text>{{item.title}}</text><text>{{item.amountText}} ›</text></view></view>
   <view wx:if="{{hasCarry}}" class="card"><text class="section-title block">补差额</text><view wx:for="{{carry}}" wx:key="source_date" class="row carry-row"><text class="muted">{{item.source_date}} 结清后补记</text><text>{{item.amount}} {{item.currency}}</text></view></view>
   <view wx:if="{{hasGroups}}" class="card"><text class="section-title block">分摊明细</text><view wx:for="{{groupRows}}" wx:key="currency"><view class="table-head table-row muted"><text>成员</text><text>实际支付（{{item.currency==='CNY' ? '元' : item.currency}}）</text><text>应承担（{{item.currency==='CNY' ? '元' : item.currency}}）</text></view><view wx:for="{{item.members}}" wx:for-item="member" wx:key="id" class="table-row"><text>{{member.name}}</text><text>{{member.paid}}</text><text class="responsibility">{{member.responsibility}}</text></view></view></view>
