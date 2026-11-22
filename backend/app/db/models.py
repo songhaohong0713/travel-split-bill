@@ -57,6 +57,10 @@ class Trip(Base):
     timezone_offset_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # "daily": past days can be settled. "trip": only after the end date.
+    settlement_cadence: Mapped[str] = mapped_column(
+        String(8), default="daily", server_default="daily"
+    )
     latest_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

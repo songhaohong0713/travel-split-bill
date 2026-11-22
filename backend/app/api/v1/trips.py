@@ -1,6 +1,6 @@
 import json
 from datetime import date
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -19,6 +19,7 @@ from sqlalchemy import delete, func, select, update
 
 from app.api.dependencies import CurrentUser, DbSession
 from app.core.business_time import client_timezone_offset
+from app.core.cadence import CADENCE_DAILY, CADENCE_TRIP
 from app.core.expense_validation import validate_expense_payload
 from app.core.money import currency_scale
 from app.core.receipt_files import (
@@ -52,17 +53,40 @@ from app.providers.cloudbase_pg import (
 router = APIRouter(prefix="/v1", tags=["trips"])
 
 
+Cadence = Literal["daily", "trip"]
+
+
 class CreateTripRequest(BaseModel):
     timezone_offset_minutes: int | None = Field(default=None, ge=-840, le=720)
     client_id: UUID | None = None
     name: str = Field(min_length=1, max_length=120)
     default_currency: str = Field(pattern=r"^[A-Z]{3}$")
+    # Clients that do not send it, and trips queued offline, stay daily.
+    settlement_cadence: Cadence = CADENCE_DAILY
+    start_date: date | None = None
+    end_date: date | None = None
 
     @field_validator("default_currency")
     @classmethod
     def supported_currency(cls, value):
         currency_scale(value)
         return value
+
+    @model_validator(mode="after")
+    def check_dates(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("结束日期不能早于开始日期")
+        return self
+
+
+def _end_date_required() -> HTTPException:
+    return HTTPException(
+        422,
+        detail={
+            "code": "END_DATE_REQUIRED",
+            "message": "整趟结需要先设置旅行结束日期",
+        },
+    )
 
 
 class CreateExpenseRequest(BaseModel):
@@ -267,12 +291,15 @@ async def create_trip(
     session: DbSession,
     user_id: CurrentUser,
 ) -> dict[str, dict[str, str]]:
+    # A trip settled as a whole needs the date that settlement waits for.
+    if body.settlement_cadence == CADENCE_TRIP and body.end_date is None:
+        raise _end_date_required()
     cloudbase = _cloudbase(http_request)
     if cloudbase is not None:
         trip_id = str(body.client_id or uuid4())
         try:
             result = await cloudbase.rpc(
-                "tsb_create_trip_with_timezone",
+                "tsb_create_trip_with_cadence",
                 {
                     "p_trip_id": trip_id,
                     "p_owner_id": user_id,
@@ -281,12 +308,23 @@ async def create_trip(
                     "p_timezone_offset": body.timezone_offset_minutes
                     if body.timezone_offset_minutes is not None
                     else client_timezone_offset.get(),
+                    "p_settlement_cadence": body.settlement_cadence,
+                    "p_start_date": body.start_date.isoformat()
+                    if body.start_date
+                    else None,
+                    "p_end_date": body.end_date.isoformat() if body.end_date else None,
                 },
             )
-        except (CloudBasePgConfigurationError, CloudBasePgUnavailable) as exc:
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict):
             raise _cloudbase_error(ValueError("invalid CloudBase trip response"))
+        if result.get("end_date_required"):
+            raise _end_date_required()
         if result.get("conflict"):
             raise HTTPException(
                 409,
@@ -335,6 +373,9 @@ async def create_trip(
         timezone_offset_minutes=body.timezone_offset_minutes
         if body.timezone_offset_minutes is not None
         else client_timezone_offset.get(),
+        settlement_cadence=body.settlement_cadence,
+        start_date=body.start_date,
+        end_date=body.end_date,
     )
     session.add(trip)
     session.flush()
@@ -371,7 +412,8 @@ async def list_trips(
                         "id": "in.("
                         + ",".join(str(row["id"]) for row in typed_rows)
                         + ")",
-                        "select": "id,start_date,end_date,timezone_offset_minutes",
+                        "select": "id,start_date,end_date,timezone_offset_minutes,"
+                        "settlement_cadence",
                     },
                 )
                 if typed_rows
@@ -401,6 +443,10 @@ async def list_trips(
                     ),
                     "start_date": dates.get(str(row["id"]), {}).get("start_date"),
                     "end_date": dates.get(str(row["id"]), {}).get("end_date"),
+                    "settlement_cadence": dates.get(str(row["id"]), {}).get(
+                        "settlement_cadence"
+                    )
+                    or CADENCE_DAILY,
                 }
                 for row in typed_rows
             ]
@@ -421,6 +467,7 @@ async def list_trips(
                 "timezone_offset_minutes": trip.timezone_offset_minutes,
                 "start_date": str(trip.start_date) if trip.start_date else None,
                 "end_date": str(trip.end_date) if trip.end_date else None,
+                "settlement_cadence": trip.settlement_cadence,
                 "member_count": session.scalar(
                     select(func.count(TripMember.id)).where(
                         TripMember.trip_id == trip.id
@@ -463,11 +510,81 @@ async def update_trip_dates(
             raise _cloudbase_error(exc) from exc
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
+        if result.get("end_date_required"):
+            raise _end_date_required()
     else:
-        trip = require_trip_owner(session, trip_id, user_id)
-        trip.start_date, trip.end_date = body.start_date, body.end_date
+        require_trip_owner(session, trip_id, user_id)
+        # One conditional statement: SQLite takes no row lock, and a trip
+        # settled as a whole must never be left without its end date.
+        keeps_end_date = (
+            [] if body.end_date else [Trip.settlement_cadence != CADENCE_TRIP]
+        )
+        result = session.execute(
+            update(Trip)
+            .where(Trip.id == trip_id, Trip.owner_id == user_id, *keeps_end_date)
+            .values(start_date=body.start_date, end_date=body.end_date)
+        )
+        if getattr(result, "rowcount", 0) != 1:
+            session.rollback()
+            raise _end_date_required()
         session.commit()
     return {"data": body.model_dump(mode="json")}
+
+
+class TripCadenceRequest(BaseModel):
+    settlement_cadence: Cadence
+
+
+@router.patch("/trips/{trip_id}/settlement-cadence")
+async def set_trip_settlement_cadence(
+    trip_id: str,
+    body: TripCadenceRequest,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    """The creator switches between daily and whole-trip settlement.
+
+    It takes effect at once: the ledger reads the choice on every request.
+    """
+    cloud = _cloudbase(request)
+    if cloud is not None:
+        try:
+            result = await cloud.rpc(
+                "tsb_set_trip_settlement_cadence",
+                {
+                    "p_trip_id": trip_id,
+                    "p_user_id": user_id,
+                    "p_settlement_cadence": body.settlement_cadence,
+                },
+            )
+        except (
+            CloudBasePgConfigurationError,
+            CloudBasePgRequestError,
+            CloudBasePgUnavailable,
+        ) as exc:
+            raise _cloudbase_error(exc) from exc
+        if not isinstance(result, dict) or result.get("not_found"):
+            raise _not_found()
+        if result.get("end_date_required"):
+            raise _end_date_required()
+    else:
+        require_trip_owner(session, trip_id, user_id)
+        has_end_date = (
+            [Trip.end_date.is_not(None)]
+            if body.settlement_cadence == CADENCE_TRIP
+            else []
+        )
+        result = session.execute(
+            update(Trip)
+            .where(Trip.id == trip_id, Trip.owner_id == user_id, *has_end_date)
+            .values(settlement_cadence=body.settlement_cadence)
+        )
+        if getattr(result, "rowcount", 0) != 1:
+            session.rollback()
+            raise _end_date_required()
+        session.commit()
+    return {"data": {"settlement_cadence": body.settlement_cadence}}
 
 
 @router.get("/trips/{trip_id}/members")

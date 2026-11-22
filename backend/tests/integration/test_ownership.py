@@ -81,6 +81,7 @@ def test_trip_list_only_returns_current_owners_trips(client: TestClient) -> None
             "timezone_offset_minutes": 0,
             "start_date": None,
             "end_date": None,
+            "settlement_cadence": "daily",
             "member_count": 1,
             "is_owner": True,
         }

@@ -12,7 +12,6 @@ REQUIRED_RPCS = {
     "tsb_mark_receipt_uploaded",
     "tsb_create_receipt_job",
     "tsb_claim_receipt_job",
-
 }
 
 
@@ -26,8 +25,11 @@ def test_migration_defines_all_mutation_rpcs():
     assert "GRANT EXECUTE ON FUNCTION" in sql
     assert "service_role" in sql
 
+
 def test_collaboration_increment_defines_invite_rpcs():
-    sql = Path("infra/cloudbase/20260919_trip_collaboration.sql").read_text(encoding="utf-8")
+    sql = Path("infra/cloudbase/20260919_trip_collaboration.sql").read_text(
+        encoding="utf-8"
+    )
     assert "CREATE TABLE IF NOT EXISTS trip_members" in sql
     assert "CREATE TABLE IF NOT EXISTS trip_invites" in sql
     assert "FUNCTION public.tsb_create_trip_invite" in sql
@@ -36,13 +38,17 @@ def test_collaboration_increment_defines_invite_rpcs():
 
 
 def test_receipt_job_membership_increment_allows_trip_members():
-    sql = Path("infra/cloudbase/20260927_receipt_job_membership.sql").read_text(encoding="utf-8")
+    sql = Path("infra/cloudbase/20260927_receipt_job_membership.sql").read_text(
+        encoding="utf-8"
+    )
     assert "tsb_create_receipt_image" in sql
     assert "trip_members" in sql
 
 
 def test_trip_ledger_follow_up_defines_owner_delete_rpcs():
-    sql = Path("infra/cloudbase/20260928_trip_ledger_follow_up.sql").read_text(encoding="utf-8")
+    sql = Path("infra/cloudbase/20260928_trip_ledger_follow_up.sql").read_text(
+        encoding="utf-8"
+    )
     assert "FUNCTION public.tsb_delete_owner_expense" in sql
     assert "FUNCTION public.tsb_delete_owner_trip" in sql
     assert "owner_id=p_owner_id" in sql
@@ -117,3 +123,54 @@ def test_member_limit_migration_rebuilds_both_invite_rpcs():
         body = functions.split("CREATE OR REPLACE FUNCTION", 1)[0]
         assert ">= 2 THEN" in body
         assert f">= {MAX_TRIP_MEMBERS} THEN" not in body
+
+
+def test_settlement_cadence_migration_matches_the_backend_contract():
+    from app.core.ledger import (
+        CADENCE_DAILY,
+        CADENCE_TRIP,
+        SNAPSHOT_CADENCE,
+        SNAPSHOT_END_DATE,
+    )
+
+    sql = Path("cloudbase/migrations/20261122010000_settlement_cadence.sql").read_text(
+        encoding="utf-8"
+    )
+    assert sql.startswith("BEGIN;") and sql.rstrip().endswith("COMMIT;")
+    assert (
+        f"ADD COLUMN IF NOT EXISTS settlement_cadence text NOT NULL DEFAULT '{CADENCE_DAILY}'"
+        in sql
+    )
+    assert f"settlement_cadence IN ('{CADENCE_DAILY}','{CADENCE_TRIP}')" in sql
+    assert f"settlement_cadence <> '{CADENCE_TRIP}' OR end_date IS NOT NULL" in sql
+    snapshot = sql.split("FUNCTION public.tsb_ledger_snapshot", 1)[1].split("$$;", 1)[0]
+    # The ledger reads these two keys on both data paths.
+    assert f"'{SNAPSHOT_CADENCE}', t.settlement_cadence" in snapshot
+    assert f"'{SNAPSHOT_END_DATE}'," in snapshot
+    for key in (
+        "currency",
+        "timezone_offset_minutes",
+        "members",
+        "revision",
+        "state",
+        "expenses",
+    ):
+        assert f"'{key}'," in snapshot
+    for name in (
+        "tsb_create_trip_with_cadence",
+        "tsb_set_trip_settlement_cadence",
+    ):
+        assert f"CREATE FUNCTION public.{name}(" in sql
+        assert f"GRANT EXECUTE ON FUNCTION public.{name}(" in sql
+        assert f"REVOKE ALL ON FUNCTION public.{name}(" in sql
+    for name in ("tsb_update_trip_dates", "tsb_ledger_snapshot"):
+        assert f"CREATE OR REPLACE FUNCTION public.{name}(" in sql
+    assert sql.count("'end_date_required'") == 3
+    # The function the previous backend calls is left exactly as deployed.
+    statements = "\n".join(
+        line for line in sql.splitlines() if not line.lstrip().startswith("--")
+    )
+    assert "tsb_create_trip_with_timezone" not in statements
+    assert sql.count("<> 'service_role' THEN RAISE EXCEPTION 'TSB_FORBIDDEN'") == 4
+    readme = Path("cloudbase/migrations/README.md").read_text(encoding="utf-8")
+    assert "20261122010000_settlement_cadence.sql" in readme

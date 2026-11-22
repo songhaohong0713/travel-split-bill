@@ -45,3 +45,30 @@ Those files still `CREATE OR REPLACE` the 2-person functions. Replaying either
 one once this migration is applied aborts with `TSB_STALE_INVITE_SQL` and
 leaves the current functions in place. An isolated restore may run them only
 against an empty database, and only before this migration.
+
+For the per-trip settlement cadence, apply
+`20261122010000_settlement_cadence.sql` before deploying the matching backend.
+It adds `trips.settlement_cadence` (`daily` or `trip`, every existing trip
+`daily`), two CHECK constraints, the new functions
+`tsb_create_trip_with_cadence` and `tsb_set_trip_settlement_cadence`, and
+rebuilds `tsb_update_trip_dates` and `tsb_ledger_snapshot` under their existing
+signatures. No stored row changes apart from the new column's default.
+
+The previous backend keeps working on the migrated database: it still calls
+`tsb_create_trip_with_timezone`, which is left as deployed and creates `daily`
+trips, and it ignores the two keys the snapshot gains (`settlement_cadence`,
+`settlement_end_date`). The matching backend does not work on an unmigrated
+database: the trip list, trip creation and the cadence setting answer 503. So
+the order is migration, then backend. Before deploying the backend, confirm the
+gateway serves the new objects: read `settlement_cadence` from `trips`, and
+call `tsb_ledger_snapshot` once to see the two new keys.
+
+Applying the migration invalidates every settlement preview that is open at
+that moment, once: confirming it answers "账单已变化", and previewing again
+works. Take backups afterwards: an archive exported before this migration is
+refused by a migrated database (`SCHEMA_MISMATCH`), as is a trip-merge plan
+prepared from an earlier export.
+
+Once any trip has been switched to `trip`, do not roll the backend back. The
+previous backend ignores the cadence, treats that trip as `daily`, and lets its
+past days be settled before the trip has ended.

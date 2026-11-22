@@ -87,3 +87,45 @@ def test_incremental_migration_preserves_old_records_and_backfills_owner(tmp_pat
         )
         assert state["history_confirmation"]["status"] == "pending"
         assert state["payments"] == []
+
+
+def test_settlement_cadence_migration_makes_existing_trips_daily(tmp_path):
+    path = tmp_path / "cadence.db"
+    environment = {**os.environ, "DATABASE_URL": f"sqlite+pysqlite:///{path}"}
+
+    def alembic(*arguments):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "backend/alembic.ini", *arguments],
+            cwd=".",
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+    alembic("upgrade", "20261119_12")
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO users(id) VALUES('a')")
+        connection.execute(
+            "INSERT INTO trips(id,owner_id,name,default_currency,end_date)"
+            " VALUES('old','a','legacy','CNY','2026-10-05')"
+        )
+
+    alembic("upgrade", "head")
+
+    with sqlite3.connect(path) as connection:
+        # An insert that does not name the column, as older code would, is daily.
+        connection.execute(
+            "INSERT INTO trips(id,owner_id,name,default_currency)"
+            " VALUES('new','a','later','CNY')"
+        )
+        assert connection.execute(
+            "SELECT id, settlement_cadence, end_date FROM trips ORDER BY id"
+        ).fetchall() == [("new", "daily", None), ("old", "daily", "2026-10-05")]
+
+    alembic("downgrade", "20261119_12")
+    with sqlite3.connect(path) as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(trips)")]
+        assert "settlement_cadence" not in columns
+        assert connection.execute("SELECT count(*) FROM trips").fetchone() == (2,)
