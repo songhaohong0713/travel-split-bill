@@ -1,6 +1,8 @@
 """The deployed invite functions, run against a real PostgreSQL."""
 
 import json
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -40,6 +42,7 @@ def call():
             return json.loads(result.stdout) if check else result
 
         call.run = run
+        call.database_url = run.url
         yield call
 
 
@@ -99,3 +102,130 @@ def test_replaced_expired_and_formerly_used_invites_are_refused(call):
 def test_only_the_service_role_may_call_the_functions(call):
     refused = call.run("SELECT tsb_accept_trip_invite('hash-i1', 'b')", check=False)
     assert "TSB_FORBIDDEN" in refused.stderr
+
+
+def _start(url, sql):
+    process = subprocess.Popen(
+        ["psql", url, "-v", "ON_ERROR_STOP=1", "-Atq"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdin is not None
+    process.stdin.write(sql)
+    process.stdin.close()
+    return process
+
+
+def _wait_until(call, sql, expected, timeout=5):
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        last = call.run(sql).stdout.strip()
+        if last == expected:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"expected {expected!r} from {sql}, last was {last!r}")
+
+
+def _hold_trip(call, after_wait):
+    """Lock trip t, wait until tsb_test_gate is released, then run after_wait."""
+    call.run(
+        "CREATE TABLE IF NOT EXISTS tsb_test_gate(id int primary key, release boolean);"
+        "INSERT INTO tsb_test_gate VALUES (1, false) ON CONFLICT (id) DO UPDATE"
+        " SET release=false;"
+    )
+    return _start(
+        call.database_url,
+        f"""
+BEGIN;
+SELECT id FROM trips WHERE id='t' FOR UPDATE;
+DO $$
+DECLARE n int := 0;
+BEGIN
+  LOOP
+    n := n + 1;
+    IF n > 400 THEN RAISE EXCEPTION 'holder timed out'; END IF;
+    PERFORM pg_sleep(0.05);
+    EXIT WHEN (SELECT release FROM tsb_test_gate WHERE id=1);
+  END LOOP;
+END $$;
+{after_wait}
+""",
+    )
+
+
+def _release_holder(call, holder, follower_sql):
+    _wait_until(
+        call,
+        "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()"
+        " AND pid<>pg_backend_pid() AND state='active' AND query LIKE '%pg_sleep%'",
+        "1",
+    )
+    follower = _start(
+        call.database_url, AS_SERVICE + "SET lock_timeout='12s'; " + follower_sql
+    )
+    try:
+        _wait_until(
+            call,
+            "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()"
+            " AND pid<>pg_backend_pid() AND wait_event_type='Lock'"
+            " AND query LIKE '%trip_invite%'",
+            "1",
+            timeout=10,
+        )
+        call.run("UPDATE tsb_test_gate SET release=true WHERE id=1")
+        # stdin is already closed, so communicate() cannot be used.
+        assert follower.wait(timeout=15) == 0, follower.stderr.read()
+        assert holder.wait(timeout=15) == 0, holder.stderr.read()
+        assert follower.stdout is not None
+        return follower.stdout.read()
+    except Exception:
+        follower.kill()
+        holder.kill()
+        raise
+
+
+def test_join_blocked_on_the_trip_sees_a_revoke_committed_while_it_waited(call):
+    assert create(call, "i1")["id"] == "i1"
+    holder = _hold_trip(
+        call, "UPDATE trip_invites SET revoked_at=now() WHERE id='i1'; COMMIT;"
+    )
+    out = _release_holder(
+        call, holder, "SELECT tsb_accept_trip_invite('hash-i1', 'c');"
+    )
+    assert json.loads(out) == {"expired": True}
+    assert call.run("SELECT count(*) FROM trip_members").stdout.strip() == "1"
+
+
+def test_replacing_a_link_waits_for_the_trip_lock(call):
+    assert create(call, "old")["id"] == "old"
+    holder = _hold_trip(call, "COMMIT;")
+    out = _release_holder(
+        call,
+        holder,
+        "SELECT tsb_create_trip_invite('fresh', 't', 'a', 'hash-fresh',"
+        " (now() + interval '7 days')::timestamp);",
+    )
+    assert json.loads(out)["id"] == "fresh"
+    assert (
+        call.run(
+            "SELECT count(*) FROM trip_invites WHERE id='old' AND revoked_at IS NOT NULL"
+        ).stdout.strip()
+        == "1"
+    )
+
+
+def test_historical_invite_sql_cannot_replace_the_six_member_functions(call):
+    assert create(call, "i1")["id"] == "i1"
+    for name in (
+        "infra/cloudbase/20260919_trip_collaboration.sql",
+        "infra/cloudbase/20260929_collaboration_permissions.sql",
+    ):
+        replayed = call.run(Path(name).read_text(encoding="utf-8"), check=False)
+        assert replayed.returncode != 0
+        assert "TSB_STALE_INVITE_SQL" in replayed.stderr
+    assert accept(call, "i1", "b")["member_count"] == 2
+    assert accept(call, "i1", "c")["member_count"] == 3
+    assert create(call, "later")["id"] == "later"

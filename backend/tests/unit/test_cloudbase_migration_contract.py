@@ -76,9 +76,44 @@ def test_member_limit_migration_rebuilds_both_invite_rpcs():
         assert ">= 2" not in body
         assert "service_role" in body
         assert f"GRANT EXECUTE ON FUNCTION public.{name}" in sql
-    accept = sql.split("FUNCTION public.tsb_accept_trip_invite", 1)[1]
+
+    def function_body(name: str) -> str:
+        return sql.split(f"FUNCTION public.{name}", 1)[1].split(
+            "CREATE OR REPLACE FUNCTION", 1
+        )[0]
+
+    create = function_body("tsb_create_trip_invite")
+    accept = function_body("tsb_accept_trip_invite")
+    assert create.index(
+        "FROM trips WHERE id=p_trip_id AND owner_id=p_creator_id FOR UPDATE"
+    ) < create.index("UPDATE trip_invites")
+    assert "token_hash=p_token_hash FOR UPDATE" not in accept
+    trip_lock = accept.index("FROM trips WHERE id=v_invite.trip_id FOR UPDATE")
+    invite_lock = accept.index("FROM trip_invites WHERE id=v_invite.id FOR UPDATE")
+    assert accept.index("WHERE token_hash=p_token_hash;") < trip_lock < invite_lock
+    for column in (
+        "v_invite.used_at IS NOT NULL",
+        "v_invite.revoked_at IS NOT NULL",
+        "v_invite.expires_at <= now()",
+    ):
+        assert invite_lock < accept.index(column)
     assert "SET used_at" not in accept
     assert "'member_count', 2" not in accept
-    assert "owner_id=p_creator_id" in sql
     readme = Path("cloudbase/migrations/README.md").read_text(encoding="utf-8")
     assert "20261121010000_trip_member_limit.sql" in readme
+    assert "same release" in readme
+    assert "TSB_STALE_INVITE_SQL" in readme
+    for historical in (
+        "infra/cloudbase/20260919_trip_collaboration.sql",
+        "infra/cloudbase/20260929_collaboration_permissions.sql",
+    ):
+        assert historical in readme
+        old = Path(historical).read_text(encoding="utf-8")
+        guard, _, functions = old.partition(
+            "CREATE OR REPLACE FUNCTION public.tsb_create_trip_invite"
+        )
+        assert "TSB_STALE_INVITE_SQL" in guard
+        assert f">= {MAX_TRIP_MEMBERS} THEN" in guard
+        body = functions.split("CREATE OR REPLACE FUNCTION", 1)[0]
+        assert ">= 2 THEN" in body
+        assert f">= {MAX_TRIP_MEMBERS} THEN" not in body

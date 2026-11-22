@@ -40,6 +40,7 @@ Page({
   addExpense(){ui.newExpense({id:this.data.tripId,default_currency:this.data.currency})},
   openDay(e){wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&date=${e.currentTarget.dataset.date}&name=${encodeURIComponent(this.data.name)}`})},
   settleTrip(){wx.navigateTo({url:`/pages/day-bill/index?tripId=${encodeURIComponent(this.data.tripId)}&name=${encodeURIComponent(this.data.name)}&dates=${encodeURIComponent(this.data.days.filter(d=>d.status==='pending').map(d=>d.date).join(','))}`})},
+  // Stage 6 still owns this screen: the owner can open an invite only while one person is on the trip.
   async prepareInvite(){
     if(!this.data.isOwner || this.data.memberCount>=2 || this.data.inviting)return
     if(offline.isLocalTrip(this.data.tripId)){this.setData({inviteOpen:true,inviteError:'旅行已保存在本机，联网同步后即可邀请同行人。'});return}
