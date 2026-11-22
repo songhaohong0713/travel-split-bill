@@ -26,6 +26,8 @@ from app.core.money import quantized_money
 from app.core.settlement import minimum_transfers
 
 FORMAT_VERSION = 2
+# Minutes behind UTC, as trips store it: UTC+8.
+DEFAULT_TIMEZONE_OFFSET_MINUTES = -480
 VERSIONED = {"format_version": FORMAT_VERSION}
 TRANSFER_IDENTITY = (
     "currency",
@@ -50,9 +52,13 @@ def amount(currency, value):
 
 
 def trip_today(snapshot, now=None):
-    offset = snapshot.get("timezone_offset_minutes")
-    if offset is None:
+    if "timezone_offset_minutes" not in snapshot:
         return business_today(now) if now else business_today()
+    # Trips from before timezones were stored have none until their creator
+    # sets one; until then their days are Beijing days for every member.
+    offset = snapshot["timezone_offset_minutes"]
+    if offset is None:
+        offset = DEFAULT_TIMEZONE_OFFSET_MINUTES
     return ((now or datetime.now(UTC)) - timedelta(minutes=offset)).date().isoformat()
 
 
@@ -332,11 +338,6 @@ def project(snapshot):
             for member, value in sorted(net.items())
             if value
         ]
-        if (
-            "timezone_offset_minutes" in snapshot
-            and snapshot["timezone_offset_minutes"] is None
-        ):
-            row["error"] = "请旅行创建者先补设结算时区"
         # A member can hold a balance no transfer can match yet, so the day
         # is judged by balances, not by whether a transfer exists.
         row["status"] = (
@@ -646,11 +647,6 @@ def _pair_groups(selected, by_date, members):
 
 def settlement_scope(snapshot, requested_dates=None, *, ledger=None):
     """`payment_preview` plus the plan each currency's transfers come from."""
-    if (
-        "timezone_offset_minutes" in snapshot
-        and snapshot["timezone_offset_minutes"] is None
-    ):
-        raise ValueError("请旅行创建者先补设结算时区")
     ledger = project(snapshot) if ledger is None else ledger
     selected, by_date = _selected_days(snapshot, requested_dates, ledger)
     selected = [day for day in selected if by_date[day]["balances"]]
