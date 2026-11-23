@@ -616,7 +616,7 @@ async def list_trip_members(
                 "/trip_members",
                 params={
                     "trip_id": f"eq.{trip_id}",
-                    "select": "user_id,joined_at,nickname",
+                    "select": "user_id,joined_at,nickname,is_placeholder",
                     "order": "joined_at.asc",
                 },
             )
@@ -665,6 +665,7 @@ async def list_trip_members(
                     or nicknames.get(str(row["user_id"])),
                     "is_owner": str(row["user_id"]) == owner_id,
                     "is_current": str(row["user_id"]) == user_id,
+                    "is_placeholder": bool(row.get("is_placeholder", False)),
                 }
                 for row in rows
             ]
@@ -687,6 +688,7 @@ async def list_trip_members(
                 ),
                 "is_owner": member.user_id == member_trip.owner_id,
                 "is_current": member.user_id == user_id,
+                "is_placeholder": member.is_placeholder,
             }
             for member in members
         ]

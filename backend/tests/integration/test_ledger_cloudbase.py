@@ -38,6 +38,10 @@ class LedgerCloud:
         }
         self.reject_commit = False
 
+    async def request(self, method, path, *, params=None, payload=None):
+        # The table read for placeholder members: this trip has none.
+        return []
+
     async def rpc(self, name, payload):
         if payload["p_user_id"] not in self.state["members"]:
             return {"not_found": True}

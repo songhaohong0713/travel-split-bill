@@ -33,8 +33,8 @@ from app.core.ledger import (
     snapshot_token,
     trip_today,
 )
-from app.db.ledger_reads import cadence_snapshot, member_snapshots
-from app.db.models import ExpenseRecord, TripLedger, TripMember
+from app.db.ledger_reads import member_snapshots, trip_snapshot
+from app.db.models import TripLedger, TripMember
 from app.db.payment_projection import sync_payments
 from app.providers.cloudbase_pg import (
     CloudBasePgConfigurationError,
@@ -195,35 +195,58 @@ async def snapshot(trip_id, request, session, user_id):
         if not isinstance(result, dict) or result.get("not_found"):
             raise _not_found()
         return result
-    trip = require_trip_member(session, trip_id, user_id)
-    ledger = session.get(TripLedger, trip_id)
-    records = session.scalars(
-        select(ExpenseRecord)
-        .where(ExpenseRecord.trip_id == trip_id)
-        .order_by(ExpenseRecord.id)
-    ).all()
-    members = sorted(
-        session.scalars(
-            select(TripMember.user_id).where(TripMember.trip_id == trip_id)
-        ).all()
+    return trip_snapshot(session, require_trip_member(session, trip_id, user_id))
+
+
+async def placeholder_members(trip_id, request, session):
+    """Ids of the trip's members who do not use the app.
+
+    Read beside the snapshot, never merged into it: the snapshot is hashed and
+    compared on commit, and it already changes whenever the member set does.
+    """
+    cloud = _cloudbase(request)
+    if cloud is None:
+        return set(
+            session.scalars(
+                select(TripMember.user_id).where(
+                    TripMember.trip_id == trip_id, TripMember.is_placeholder
+                )
+            ).all()
+        )
+    try:
+        rows = await cloud.request(
+            "GET",
+            "/trip_members",
+            params={
+                "trip_id": f"eq.{trip_id}",
+                "is_placeholder": "eq.true",
+                "select": "user_id",
+            },
+        )
+    except (
+        CloudBasePgConfigurationError,
+        CloudBasePgRequestError,
+        CloudBasePgUnavailable,
+    ) as exc:
+        raise _cloudbase_error(exc) from exc
+    if not isinstance(rows, list):
+        raise _cloudbase_error(ValueError("invalid CloudBase member response"))
+    return {str(row["user_id"]) for row in rows}
+
+
+def stand_in(group, placeholders):
+    """Which side of a transfer cannot act for itself: payer, recipient or both."""
+    payer = group.get("from_participant_id") in placeholders
+    recipient = group["to_participant_id"] in placeholders
+    return (
+        "both"
+        if payer and recipient
+        else "payer"
+        if payer
+        else "recipient"
+        if recipient
+        else None
     )
-    return {
-        "currency": trip.default_currency,
-        "timezone_offset_minutes": trip.timezone_offset_minutes,
-        **cadence_snapshot(trip),
-        "members": members,
-        "revision": ledger.revision if ledger else 0,
-        "state": deepcopy(ledger.state_json) if ledger else {"payments": []},
-        "expenses": [
-            {
-                "id": r.id,
-                "revision": r.revision,
-                "occurred_at": str(r.occurred_at),
-                "payload": r.payload_json,
-            }
-            for r in records
-        ],
-    }
 
 
 async def persist(trip_id, request, session, user_id, old, state):
@@ -390,35 +413,13 @@ def requested_transfer(old, body):
     return scope, found, mark
 
 
-@router.post("/{trip_id}/payments", status_code=201)
-async def mark_payment(
-    trip_id: str,
-    body: PaymentRequest,
-    request: Request,
-    session: DbSession,
-    user_id: CurrentUser,
-):
-    old = await snapshot(trip_id, request, session, user_id)
-    p, group, mark = requested_transfer(old, body)
-    if group is None:
-        if body.mark_id:
-            raise conflict()
-        raise HTTPException(
-            422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
-        )
-    if not group.get("offset_only") and group["to_participant_id"] != user_id:
-        raise HTTPException(
-            403,
-            detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认已收款"},
-        )
-    if body.mark_id and (
-        mark is None
-        or mark.get("revoked_at")
-        or mark.get("confirmed_payment_id")
-        or not mark_matches(mark, group)
-    ):
-        raise conflict()
-    state = deepcopy(old["state"])
+def settle(old, p, group, body, user_id, state, *, mark=None, placeholder=None):
+    """Append the settlement of one proposed transfer to `state`.
+
+    `placeholder` names the side that does not use the app; the record then
+    says who stood in for it. It stores the actor, never the placeholder's id,
+    so it stays true after that member is claimed.
+    """
     payment = {
         **group,
         "id": str(uuid4()),
@@ -426,6 +427,8 @@ async def mark_payment(
         "created_by": user_id,
         "snapshot_token": body.token,
     }
+    if placeholder:
+        payment["on_behalf"] = {"by": user_id, "placeholder": placeholder}
     if len(old["members"]) > 2:
         drop_broken_plans(old, state)
         fix_plans(state, p, user_id)
@@ -463,6 +466,69 @@ async def mark_payment(
                 saved_mark["confirmed_payment_id"] = payment["id"]
                 saved_mark["confirmed_at"] = payment["created_at"]
     state["payments"].append(payment)
+    return payment
+
+
+def supersede_marks(state, p, group, user_id):
+    """Withdraw the pair's earlier open marks; other pairs' marks are untouched."""
+    for previous in state.setdefault("payer_marks", []):
+        if (
+            not previous.get("revoked_at")
+            and not previous.get("confirmed_payment_id")
+            and same_pair(previous, group)
+            and set(previous["dates"]) & set(p["dates"])
+        ):
+            previous.update(
+                revoked_at=datetime.now(UTC).isoformat(),
+                revoked_by=user_id,
+                revoke_reason="superseded",
+            )
+
+
+@router.post("/{trip_id}/payments", status_code=201)
+async def mark_payment(
+    trip_id: str,
+    body: PaymentRequest,
+    request: Request,
+    session: DbSession,
+    user_id: CurrentUser,
+):
+    old = await snapshot(trip_id, request, session, user_id)
+    p, group, mark = requested_transfer(old, body)
+    if group is None:
+        if body.mark_id:
+            raise conflict()
+        raise HTTPException(
+            422, detail={"code": "NOTHING_TO_PAY", "message": "该币种没有待结清金额"}
+        )
+    placeholder = (
+        None
+        if group.get("offset_only")
+        else stand_in(group, await placeholder_members(trip_id, request, session))
+    )
+    # The recipient confirms; when neither side uses the app, any member does.
+    if (
+        not group.get("offset_only")
+        and placeholder != "both"
+        and group["to_participant_id"] != user_id
+    ):
+        raise HTTPException(
+            403,
+            detail={"code": "RECIPIENT_REQUIRED", "message": "仅收款方可以确认已收款"},
+        )
+    if body.mark_id and (
+        mark is None
+        or mark.get("revoked_at")
+        or mark.get("confirmed_payment_id")
+        or not mark_matches(mark, group)
+    ):
+        raise conflict()
+    state = deepcopy(old["state"])
+    payment = settle(
+        old, p, group, body, user_id, state, mark=mark, placeholder=placeholder
+    )
+    if placeholder and mark is None:
+        supersede_marks(state, p, group, user_id)
     await persist(trip_id, request, session, user_id, old, state)
     return {"data": payment}
 
@@ -515,25 +581,19 @@ async def mark_paid(
         raise HTTPException(
             422, detail={"code": "NOTHING_TO_PAY", "message": "没有待付款金额"}
         )
-    if group["from_participant_id"] != user_id:
+    placeholder = stand_in(group, await placeholder_members(trip_id, request, session))
+    # The payer marks; when neither side uses the app, any member does.
+    if placeholder != "both" and group["from_participant_id"] != user_id:
         raise HTTPException(
             403, detail={"code": "PAYER_REQUIRED", "message": "仅付款方可以标记已付款"}
         )
     state = deepcopy(old["state"])
-    marks = state.setdefault("payer_marks", [])
-    for previous in marks:
-        # Other pairs' marks in the same range are untouched.
-        if (
-            not previous.get("revoked_at")
-            and not previous.get("confirmed_payment_id")
-            and same_pair(previous, group)
-            and set(previous["dates"]) & set(p["dates"])
-        ):
-            previous.update(
-                revoked_at=datetime.now(UTC).isoformat(),
-                revoked_by=user_id,
-                revoke_reason="superseded",
-            )
+    supersede_marks(state, p, group, user_id)
+    if placeholder in ("recipient", "both"):
+        # Nobody could confirm receipt, so the payer's word settles it.
+        payment = settle(old, p, group, body, user_id, state, placeholder=placeholder)
+        await persist(trip_id, request, session, user_id, old, state)
+        return {"data": payment}
     mark = {
         **group,
         "id": str(uuid4()),
@@ -547,7 +607,7 @@ async def mark_paid(
         drop_broken_plans(old, state)
         fix_plans(state, p, user_id)
         mark["plan_id"] = group["plan_id"]
-    marks.append(mark)
+    state["payer_marks"].append(mark)
     await persist(trip_id, request, session, user_id, old, state)
     return {"data": mark}
 

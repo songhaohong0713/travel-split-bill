@@ -20,6 +20,38 @@ def cadence_snapshot(trip):
     }
 
 
+def trip_snapshot(session, trip):
+    """The ledger snapshot of one trip, as tsb_ledger_snapshot returns it."""
+    ledger = session.get(TripLedger, trip.id)
+    records = session.scalars(
+        select(ExpenseRecord)
+        .where(ExpenseRecord.trip_id == trip.id)
+        .order_by(ExpenseRecord.id)
+    ).all()
+    members = sorted(
+        session.scalars(
+            select(TripMember.user_id).where(TripMember.trip_id == trip.id)
+        ).all()
+    )
+    return {
+        "currency": trip.default_currency,
+        "timezone_offset_minutes": trip.timezone_offset_minutes,
+        **cadence_snapshot(trip),
+        "members": members,
+        "revision": ledger.revision if ledger else 0,
+        "state": deepcopy(ledger.state_json) if ledger else {"payments": []},
+        "expenses": [
+            {
+                "id": r.id,
+                "revision": r.revision,
+                "occurred_at": str(r.occurred_at),
+                "payload": r.payload_json,
+            }
+            for r in records
+        ],
+    }
+
+
 def member_snapshots(session, user_id):
     """Four set queries regardless of how many trips are in the homepage."""
     trips = session.scalars(

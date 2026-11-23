@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -78,6 +80,12 @@ class TripMember(Base):
     trip_id: Mapped[str] = mapped_column(ForeignKey("trips.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     nickname: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # A person who does not use the app, added by a member. Only this flag
+    # tells one apart: real users can also lack a WeChat identity.
+    is_placeholder: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
+    added_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

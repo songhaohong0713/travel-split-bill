@@ -129,3 +129,44 @@ def test_settlement_cadence_migration_makes_existing_trips_daily(tmp_path):
         columns = [row[1] for row in connection.execute("PRAGMA table_info(trips)")]
         assert "settlement_cadence" not in columns
         assert connection.execute("SELECT count(*) FROM trips").fetchone() == (2,)
+
+
+def test_placeholder_migration_marks_existing_members_as_real(tmp_path):
+    path = tmp_path / "placeholder.db"
+    environment = {**os.environ, "DATABASE_URL": f"sqlite+pysqlite:///{path}"}
+
+    def alembic(*arguments):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "backend/alembic.ini", *arguments],
+            cwd=".",
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+    alembic("upgrade", "20261122_13")
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO users(id) VALUES('a')")
+        connection.execute(
+            "INSERT INTO trips(id,owner_id,name,default_currency) VALUES('t','a','n','CNY')"
+        )
+        connection.execute(
+            "INSERT INTO trip_members(id,trip_id,user_id,joined_at)"
+            " VALUES('m','t','a','2026-11-01')"
+        )
+
+    alembic("upgrade", "head")
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT user_id, is_placeholder, added_by FROM trip_members"
+        ).fetchall() == [("a", 0, None)]
+    alembic("downgrade", "20261122_13")
+    with sqlite3.connect(path) as connection:
+        columns = [r[1] for r in connection.execute("PRAGMA table_info(trip_members)")]
+        assert "is_placeholder" not in columns and "added_by" not in columns
+        assert connection.execute("SELECT count(*) FROM trip_members").fetchone() == (
+            1,
+        )

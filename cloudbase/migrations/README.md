@@ -72,3 +72,29 @@ prepared from an earlier export.
 Once any trip has been switched to `trip`, do not roll the backend back. The
 previous backend ignores the cadence, treats that trip as `daily`, and lets its
 past days be settled before the trip has ended.
+
+For placeholder members, apply `20261123010000_placeholder_members.sql` before
+deploying the matching backend. It adds `trip_members.is_placeholder` (false
+for every existing member) and `trip_members.added_by`, creates
+`tsb_add_placeholder_member`, `tsb_delete_placeholder_member`,
+`tsb_claim_check`, `tsb_claim_snapshot` and `tsb_claim_placeholder_member`, and
+rebuilds `tsb_create_trip_invite` under its existing signature so that a full
+trip can still issue a link while it has a placeholder to claim.
+`tsb_accept_trip_invite` and the settlement projection trigger are not touched.
+
+The previous backend keeps working on the migrated database: it names neither
+new column and calls none of the new functions. The matching backend does not
+work on an unmigrated one: the member list, the invite preview and every
+"mark paid" or "confirm received" read `is_placeholder` and answer 503. So the
+order is migration, then backend, and between the two confirm the gateway
+serves the new column: read `is_placeholder` from `trip_members`.
+
+Once a placeholder exists, do not roll the backend back. The previous backend
+treats it as an ordinary member: nobody can confirm receipt for it, a mark paid
+toward it stays open forever, and nothing can claim or delete it. Never drop
+the two columns either; nothing else tells a placeholder from a real member.
+
+A claim cannot be undone: it rewrites the placeholder's id into the claimer's
+across one trip and deletes the placeholder's user row. Take a backup before
+the first claim in production. An archive exported before this migration is
+refused by a migrated database (`SCHEMA_MISMATCH`).

@@ -12,6 +12,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.auth import validate_auth_configuration
 from app.api.v1.history import router as history_router
 from app.api.v1.ledger import router as ledger_router
+from app.api.v1.placeholders import router as placeholders_router
 from app.api.v1.profile import router as profile_router
 from app.api.v1.settlements import router as settlements_router
 from app.api.v1.shares import router as shares_router
@@ -45,7 +46,11 @@ async def lifespan(_: FastAPI):
             app.state.receipt_storage = ReceiptStorage.from_environment()
         except ReceiptStorageError:
             app.state.receipt_storage = None
-    cleanup_task = asyncio.create_task(cleanup_loop(app)) if isinstance(getattr(app.state, 'receipt_storage', None), ReceiptStorage) else None
+    cleanup_task = (
+        asyncio.create_task(cleanup_loop(app))
+        if isinstance(getattr(app.state, "receipt_storage", None), ReceiptStorage)
+        else None
+    )
     try:
         yield
     finally:
@@ -165,6 +170,7 @@ app.include_router(ledger_router)
 app.include_router(history_router)
 app.include_router(trips_router)
 app.include_router(trip_invites_router)
+app.include_router(placeholders_router)
 app.include_router(settlements_router)
 app.include_router(shares_router)
 app.include_router(uploads_router)

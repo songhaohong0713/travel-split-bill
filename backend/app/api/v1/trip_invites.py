@@ -47,6 +47,18 @@ def _member_count(session: DbSession, trip_id: str) -> int:
     )
 
 
+def _placeholders(session: DbSession, trip_id: str) -> list[dict[str, Any]]:
+    """The trip's unclaimed placeholders, oldest first, as an invite shows them."""
+    return [
+        {"id": member.user_id, "nickname": member.nickname}
+        for member in session.scalars(
+            select(TripMember)
+            .where(TripMember.trip_id == trip_id, TripMember.is_placeholder)
+            .order_by(TripMember.joined_at)
+        ).all()
+    ]
+
+
 def _full() -> HTTPException:
     return HTTPException(
         status_code=409,
@@ -116,7 +128,11 @@ async def create_trip_invite(
             raise _full()
         return {"data": {"token": token, "expires_at": str(result["expires_at"])}}
     _lock_trip(session, trip_id, user_id)
-    if _member_count(session, trip_id) >= MAX_TRIP_MEMBERS:
+    # A full trip still issues a link while it has a placeholder to claim;
+    # joining it as a new member is what answers "full".
+    if _member_count(session, trip_id) >= MAX_TRIP_MEMBERS and not _placeholders(
+        session, trip_id
+    ):
         raise _full()
     now = _now()
     session.execute(
@@ -215,6 +231,27 @@ async def get_trip_invite(
                 if isinstance(names, list) and names and isinstance(names[0], dict)
                 else None
             )
+            placeholder_rows = (
+                []
+                if already_member
+                else await cloudbase.request(
+                    "GET",
+                    "/trip_members",
+                    params={
+                        "trip_id": f"eq.{invite['trip_id']}",
+                        "is_placeholder": "eq.true",
+                        "select": "user_id,nickname",
+                        "order": "joined_at.asc",
+                    },
+                )
+            )
+            placeholders = [
+                {"id": str(row["user_id"]), "nickname": row.get("nickname")}
+                for row in (
+                    placeholder_rows if isinstance(placeholder_rows, list) else []
+                )
+                if isinstance(row, dict) and "user_id" in row
+            ]
         except (
             CloudBasePgConfigurationError,
             CloudBasePgRequestError,
@@ -228,6 +265,7 @@ async def get_trip_invite(
                 "expires_at": str(invite["expires_at"]),
                 "already_member": already_member,
                 "inviter_name": inviter_name or "旅行发起人",
+                "placeholders": placeholders,
             }
         }
     invite = session.scalar(
@@ -262,6 +300,8 @@ async def get_trip_invite(
                 user.nickname if (user := session.get(User, trip.owner_id)) else None
             )
             or "旅行发起人",
+            # Who the newcomer may turn out to be; a member cannot claim.
+            "placeholders": [] if already_member else _placeholders(session, trip.id),
         }
     }
 

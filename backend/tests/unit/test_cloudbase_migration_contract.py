@@ -174,3 +174,55 @@ def test_settlement_cadence_migration_matches_the_backend_contract():
     assert sql.count("<> 'service_role' THEN RAISE EXCEPTION 'TSB_FORBIDDEN'") == 4
     readme = Path("cloudbase/migrations/README.md").read_text(encoding="utf-8")
     assert "20261122010000_settlement_cadence.sql" in readme
+
+
+def test_placeholder_migration_keeps_the_projection_guard_and_the_accept_function():
+    sql = Path("cloudbase/migrations/20261123010000_placeholder_members.sql").read_text(
+        encoding="utf-8"
+    )
+    statements = "\n".join(
+        line for line in sql.splitlines() if not line.lstrip().startswith("--")
+    )
+    assert sql.startswith("BEGIN;") and sql.rstrip().endswith("COMMIT;")
+    assert (
+        "ADD COLUMN IF NOT EXISTS is_placeholder boolean NOT NULL DEFAULT false" in sql
+    )
+    assert "ADD COLUMN IF NOT EXISTS added_by text REFERENCES public.users(id)" in sql
+    new = (
+        "tsb_add_placeholder_member",
+        "tsb_delete_placeholder_member",
+        "tsb_claim_check",
+        "tsb_claim_snapshot",
+        "tsb_claim_placeholder_member",
+    )
+    for name in new:
+        assert f"CREATE FUNCTION public.{name}(" in sql
+        assert f"REVOKE ALL ON FUNCTION public.{name}(" in sql
+        assert f"GRANT EXECUTE ON FUNCTION public.{name}(" in sql
+    assert (
+        statements.count("<> 'service_role' THEN RAISE EXCEPTION 'TSB_FORBIDDEN'") == 6
+    )
+    # Claiming goes its own way: the general guard of settlement history and
+    # the function people join through are not redefined, disabled or bypassed.
+    for untouched in (
+        "tsb_project_ledger_payments",
+        "tsb_accept_trip_invite",
+        "TRIGGER",
+    ):
+        assert untouched not in statements
+    assert "session_replication_role" not in sql
+    claim = statements.split("FUNCTION public.tsb_claim_placeholder_member", 1)[
+        1
+    ].split("$$;", 1)[0]
+    # Settlement rows first, then the ledger state the trigger compares them with.
+    assert claim.index("UPDATE payment_records") < claim.index("UPDATE trip_ledgers")
+    assert claim.index("UPDATE trip_ledgers") < claim.index("DELETE FROM users")
+    assert "IS DISTINCT FROM p_expected" in claim
+    create = statements.split("FUNCTION public.tsb_create_trip_invite", 1)[1].split(
+        "$$;", 1
+    )[0]
+    assert (
+        ">= 6 AND NOT EXISTS" in create and "owner_id=p_creator_id FOR UPDATE" in create
+    )
+    readme = Path("cloudbase/migrations/README.md").read_text(encoding="utf-8")
+    assert "20261123010000_placeholder_members.sql" in readme
