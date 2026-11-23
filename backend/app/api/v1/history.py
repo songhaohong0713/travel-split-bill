@@ -7,7 +7,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.v1.ledger import conflict, persist, snapshot
+from app.api.v1.ledger import (
+    conflict,
+    persist,
+    placeholder_members,
+    snapshot,
+    stand_in,
+)
 from app.api.v1.trips import (
     _cloudbase,
     _cloudbase_error,
@@ -100,6 +106,17 @@ async def prepare_history(
     return {"data": {"status": "pending"}}
 
 
+async def note_stand_ins(proposed, trip_id, request, session, user_id):
+    """Say on each historical settlement who confirmed it for a placeholder."""
+    if not proposed["payments"]:
+        return
+    placeholders = await placeholder_members(trip_id, request, session)
+    for payment in proposed["payments"]:
+        side = stand_in(payment, placeholders)
+        if side:
+            payment["on_behalf"] = {"by": user_id, "placeholder": side}
+
+
 def plan(old, body, user_id):
     selection = body.model_dump(mode="json", exclude={"token"})
     try:
@@ -124,6 +141,7 @@ async def preview_history(
     if body.mode == "unpaid":
         await require_owner(trip_id, request, session, user_id)
     proposed = plan(await snapshot(trip_id, request, session, user_id), body, user_id)
+    await note_stand_ins(proposed, trip_id, request, session, user_id)
     return {"data": {key: value for key, value in proposed.items() if key != "state"}}
 
 
@@ -143,5 +161,6 @@ async def confirm_history(
     proposed = plan(old, body, user_id)
     if proposed["token"] != body.token:
         raise conflict()
+    await note_stand_ins(proposed, trip_id, request, session, user_id)
     await persist(trip_id, request, session, user_id, old, proposed["state"])
     return {"data": {"status": "confirmed", "remaining": proposed["remaining"]}}

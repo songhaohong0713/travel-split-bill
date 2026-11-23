@@ -338,3 +338,28 @@ def test_only_the_service_role_may_call_the_new_functions(call):
         "tsb_claim_placeholder_member('hash', 'r', 'p', '{}', '[]', '{}', '[]')",
     ):
         assert "TSB_FORBIDDEN" in call.run("SELECT " + sql, check=False).stderr
+
+
+def test_claim_in_a_trip_without_a_ledger_row_creates_one_only_when_asked(call):
+    add(call, "p")
+    old = snapshot(call)
+    assert old["revision"] == 0
+
+    def run(claimer, placeholder, state):
+        prepared = call(f"tsb_claim_snapshot('hash', '{claimer}', '{placeholder}')")
+        return call(
+            f"tsb_claim_placeholder_member('hash', '{claimer}', '{placeholder}', "
+            f"{literal(prepared['snapshot'])}, '[]'::jsonb, "
+            + ("NULL" if state is None else literal(state))
+            + ", '[]'::jsonb)"
+        )
+
+    assert run("r", "p", None)["member_count"] == 2
+    assert rows(call, "SELECT count(*) FROM trip_ledgers") == ["0"]
+    add(call, "q")
+    assert (
+        run("s", "q", {"payments": [], "plans": [{"id": "fixed"}]})["member_count"] == 3
+    )
+    assert rows(
+        call, "SELECT revision, state_json->'plans'->0->>'id' FROM trip_ledgers"
+    ) == ["1|fixed"]

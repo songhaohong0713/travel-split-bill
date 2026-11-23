@@ -261,13 +261,25 @@ def project(snapshot):
                 ):
                     for member, value in original.items():
                         frozen[*key, member] = value
+    settled_here = {}
+    for payment in active:
+        if _is_member_format(payment):
+            for day, member, value in _deductions(members, payment):
+                key = day, payment["currency"], member
+                settled_here[key] = settled_here.get(key, Decimal(0)) + value
     for day, currencies in known_currencies.items():
         if currencies and all(
             (day, c, member) in frozen for c in currencies for member in members
         ):
             for currency in _balances(raw.get(day, {"groups": []})):
                 for member in members:
-                    frozen.setdefault((day, currency, member), Decimal(0))
+                    # A settlement already taken off this member here must not
+                    # vanish with the freeze: it stays counted against what
+                    # rolls forward.
+                    frozen.setdefault(
+                        (day, currency, member),
+                        settled_here.get((day, currency, member), Decimal(0)),
+                    )
     dates = set(raw)
     for payment in snapshot["state"]["payments"]:
         dates |= {day for day, _, _ in _deductions(members, payment)}
@@ -793,11 +805,12 @@ def same_transfer(left, right):
 def mark_matches(mark, transfer):
     """Whether a payer's mark still stands for a transfer proposed now.
 
-    A mark made while the trip had two members knows neither plans nor
-    per-member allocations. It keeps standing after more members join as long
-    as the same pair still owes the same amount for the same days.
+    A trip writes two-member records while it has two members and per-member
+    ones otherwise, and its size can change in both directions. A mark made
+    in the other shape keeps standing as long as the same pair still owes the
+    same amount for the same days.
     """
-    if "payer_allocations" in mark or "payer_allocations" not in transfer:
+    if ("payer_allocations" in mark) == ("payer_allocations" in transfer):
         return same_transfer(transfer, mark) and transfer.get("plan_id") == mark.get(
             "plan_id"
         )

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 
 from app.api.dependencies import CurrentUser, DbSession
-from app.api.v1.ledger import snapshot
+from app.api.v1.ledger import placeholder_members, snapshot
 from app.api.v1.profile import NicknameRequest
 from app.api.v1.trip_invites import (
     _expired,
@@ -220,7 +220,9 @@ async def delete_placeholder(
     cloud = _cloudbase(request)
     if cloud is not None:
         old = await snapshot(trip_id, request, session, user_id)
-        plan = removal(old, placeholder_id) if placeholder_id in old["members"] else {}
+        if placeholder_id not in await placeholder_members(trip_id, request, session):
+            raise _not_found()
+        plan = removal(old, placeholder_id)
         if plan is None:
             raise _in_use()
         result = await _rpc(
@@ -359,6 +361,11 @@ def apply_claim(session, trip_id, member, user_id, rewrite) -> None:
         # A snapshot read before the claim must not be written back.
         ledger.state_json = rewrite["state"]
         ledger.revision += 1
+    elif rewrite["state_changed"]:
+        # No settlement yet, but the open proposal was fixed for the claim.
+        session.add(
+            TripLedger(trip_id=trip_id, revision=1, state_json=rewrite["state"])
+        )
 
 
 async def _claim_cloud(cloud, token, placeholder_id, user_id) -> dict[str, Any]:
@@ -381,7 +388,10 @@ async def _claim_cloud(cloud, token, placeholder_id, user_id) -> dict[str, Any]:
             **arguments,
             "p_expected": old,
             "p_expenses": rewrite["expenses"],
-            "p_state": rewrite["state"],
+            # Null leaves a trip that has no ledger row without one.
+            "p_state": rewrite["state"]
+            if old["revision"] or rewrite["state_changed"]
+            else None,
             "p_payments": rewrite["payments"],
         },
     )

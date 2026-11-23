@@ -599,3 +599,147 @@ def test_claim_in_a_two_member_trip_keeps_the_settled_day_and_its_amounts(
             == 200
         )
     drop_schema()
+
+
+def test_claim_does_not_hand_other_members_someone_else_to_pay(ledger):
+    """Equal debts are paired in id order; a new id must not re-pair them."""
+    c, base = ledger
+    join(base, "c")
+    p = add(c, base).json()["data"]["id"]
+    spend(c, base, {p: "100"}, payer="a")
+    spend(c, base, {"c": "100"}, payer="b")
+    # An id on the other side of "c" than the placeholder's own.
+    claimer = "zz" if p < "c" else "0-x"
+    before = ledger_people(c, base, "a", {p: claimer})
+
+    assert claim(c, invite(c, base), p, claimer).status_code == 200
+
+    after = ledger_people(c, base, "a")
+    # What people are asked to pay, and can act on, is unchanged.
+    assert after["open"] == before["open"]
+    assert [
+        (t["from_participant_id"], t["to_participant_id"], t["amount"], t["status"])
+        for t in view(c, base)[1][D1]["transfers"]
+    ] == [("c", "b", "100.00", "pending"), (claimer, "a", "100.00", "pending")] or [
+        (t["from_participant_id"], t["to_participant_id"])
+        for t in view(c, base)[1][D1]["transfers"]
+    ] == sorted((f, t) for f, t, _ in before["open"])
+    # A day's own `pending` list is paired afresh in id order on every read,
+    # so with equal amounts it may pair differently; nets and balances do not.
+    for day in (before, after):
+        for row in day["days"].values():
+            row.pop("pending")
+    assert after == before
+
+
+def test_text_that_happens_to_equal_the_claimers_id_does_not_block_a_claim(ledger):
+    c, base, p = placeholder_trip(ledger)
+    saved, body = spend(c, base, {"a": "100", p: "50"})
+    body["payload"]["title"] = "r"
+    assert (
+        c.patch(
+            base + "/expenses/" + saved["id"],
+            headers=auth(),
+            json={**body, "revision": 1},
+        ).status_code
+        == 200
+    )
+
+    assert claim(c, invite(c, base), p, "r").status_code == 200
+
+
+def test_deleting_an_unused_placeholder_keeps_an_open_mark_between_the_others(ledger):
+    c, base, p = placeholder_trip(ledger)
+    spend(c, base, {"b": "80"}, payer="a")
+    marked = mark(c, base, "b", "a").json()["data"]
+    assert "payer_allocations" in marked
+
+    assert c.delete(base + "/placeholders/" + p, headers=auth()).status_code == 204
+
+    # Two members again: the mark made as three still names the same transfer.
+    data, days = view(c, base)
+    assert [m["stale"] for m in data["payer_marks"]] == [False]
+    assert [t["status"] for t in days[D1]["transfers"]] == ["marked"]
+    preview = c.post(base + "/payments/preview", headers=auth(), json={}).json()["data"]
+    paid = c.post(
+        base + "/payments",
+        headers=auth(),
+        json={
+            "dates": preview["dates"],
+            "token": preview["token"],
+            "currency": "CNY",
+            "mark_id": marked["id"],
+        },
+    )
+    assert paid.status_code == 201, paid.text
+    assert view(c, base)[1][D1]["status"] == "settled"
+
+
+def test_history_confirmed_for_a_placeholder_payer_says_who_stood_in(tmp_path):
+    from app.db.session import configure_database, create_schema, drop_schema
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    configure_database(f"sqlite+pysqlite:///{tmp_path / 'history.db'}")
+    create_schema()
+    with TestClient(app) as c:
+        trip = c.post(
+            "/v1/trips",
+            headers=auth("m"),
+            json={"name": "独行", "default_currency": "CNY"},
+        ).json()["data"]["id"]
+        base = f"/v1/trips/{trip}"
+        p = c.post(
+            base + "/placeholders", headers=auth("m"), json={"nickname": "小王"}
+        ).json()["data"]["id"]
+        body = {
+            "occurred_at": D1,
+            "payload": {
+                "title": "晚餐",
+                "participants": ["m", p],
+                "expenses": [
+                    {
+                        "expense_id": "e",
+                        "payer_id": "m",
+                        "settlement_currency": "CNY",
+                        "items": [
+                            {
+                                "item_id": "i",
+                                "amount": {"currency": "CNY", "amount": "120"},
+                                "allocation": {"m": "0.5", p: "0.5"},
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+        assert (
+            c.post(
+                base + "/expenses",
+                headers={**auth("m"), "Idempotency-Key": str(uuid4())},
+                json=body,
+            ).status_code
+            == 201
+        )
+        assert c.post(base + "/history/prepare", headers=auth("m")).status_code == 200
+        preview = c.post(
+            base + "/history/preview", headers=auth("m"), json={"mode": "settled"}
+        ).json()["data"]
+        assert preview["payments"][0]["on_behalf"] == {
+            "by": "m",
+            "placeholder": "payer",
+        }
+
+        confirmed = c.post(
+            base + "/history/confirm",
+            headers=auth("m"),
+            json={"mode": "settled", "token": preview["token"]},
+        )
+
+        assert confirmed.status_code == 200, confirmed.text
+        payment = c.get(base + "/ledger", headers=auth("m")).json()["data"]["payments"][
+            0
+        ]
+        assert payment["on_behalf"] == {"by": "m", "placeholder": "payer"}
+        assert payment["created_by"] == "m"
+    drop_schema()

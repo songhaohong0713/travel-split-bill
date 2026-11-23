@@ -836,3 +836,40 @@ def test_new_currency_on_a_settled_multi_member_day_reopens_that_day(ledger):
         ("b", "a", "1000"),
         ("c", "a", "1000"),
     ]
+
+
+def test_settlement_taken_on_a_day_survives_a_new_currency_freezing_that_day(ledger):
+    """A pair-settled day later gains a currency; what was settled there stays counted."""
+    c, base = ledger
+    d6 = "2026-10-06"
+    expense(c, base, "1000", day=D1, currency="JPY")
+    p = c.post(base + "/payments/preview", headers=auth("b"), json={"dates": [D1]})
+    p = p.json()["data"]
+    settled = c.post(
+        base + "/payments",
+        headers=auth("a"),
+        json={"dates": p["dates"], "token": p["token"], "currency": "JPY"},
+    )
+    assert settled.status_code == 201
+    saved, body = spend(c, base, {"b": "100"}, payer="a", day=d6)
+    join(base, "c")
+    assert confirm(c, base, "b", "a", [d6]).status_code == 201
+    # 30 more for the settled day rolls onto the next day for a and b.
+    respend(c, base, saved, body, {"b": "130"})
+    # a's 16 rolls there too; c owes it on the day itself and pays.
+    spend(c, base, {"c": "16"}, payer="a", day=d6)
+    assert confirm(c, base, "c", "a").status_code == 201
+
+    # The first yuan expense on the day the pair settled in yen only.
+    spend(c, base, {"b": "10"}, payer="a", day=D1)
+
+    data, days = view(c, base)
+    owed = {}
+    for day in days.values():
+        for balance in day["balances"]:
+            if balance["currency"] == "CNY":
+                key = balance["participant_id"]
+                owed[key] = owed.get(key, 0) + float(balance["amount"])
+    # 30 + 10 between a and b; the 16 that c paid is not owed again.
+    assert owed == {"a": 40.0, "b": -40.0}
+    assert pairs(data["summary"]) == [("b", "a", "40.00")]

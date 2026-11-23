@@ -13,7 +13,7 @@ instead of trusting a list of known fields.
 from copy import deepcopy
 from decimal import Decimal
 
-from app.core.ledger import FORMAT_VERSION, amount
+from app.core.ledger import FORMAT_VERSION, amount, fix_plans, settlement_scope
 
 
 class ClaimRefused(ValueError):
@@ -111,6 +111,22 @@ def _keep_pair_view(record, old, new):
     return flipped
 
 
+def _with_fixed_proposal(snapshot, actor):
+    """The ledger state with what is proposed right now stored as a plan.
+
+    Equal amounts are paired in id order, so a new id could hand other
+    members a different person to pay. Fixing the open proposal first keeps
+    everyone's transfers as they were shown before the claim.
+    """
+    state = deepcopy(snapshot["state"])
+    if len(snapshot["members"]) > 2:
+        try:
+            fix_plans(state, settlement_scope(snapshot), actor)
+        except ValueError:
+            pass  # Nothing can be settled yet, so nothing is proposed.
+    return state
+
+
 def claim(snapshot, old, new):
     """Everything a claim writes: `old` becomes `new` throughout one trip.
 
@@ -124,14 +140,10 @@ def claim(snapshot, old, new):
         raise ClaimRefused("这位成员已不在这段旅行里")
     expenses = []
     for record in snapshot["expenses"]:
-        if mentions(record["payload"], new):
-            raise ClaimRefused("认领者已出现在这段旅行的数据里")
         payload = renamed(record["payload"], old, new)
         if payload != record["payload"]:
             expenses.append({"id": record["id"], "payload": payload})
     before = snapshot["state"]
-    if mentions(before, new):
-        raise ClaimRefused("认领者已出现在这段旅行的数据里")
     if any(
         _is_pair_format(payment)
         and None
@@ -141,7 +153,7 @@ def claim(snapshot, old, new):
         # Such a record is read through the trip's first two members, which a
         # new id can change. No writer produces one; refuse rather than guess.
         raise ClaimRefused("这段旅行有缺少付款方或收款方的旧结清记录")
-    state = renamed(deepcopy(before), old, new)
+    state = renamed(_with_fixed_proposal(snapshot, new), old, new)
     state["payments"] = [
         _keep_pair_view(payment, old, new) if _is_pair_format(payment) else payment
         for payment in state.get("payments", [])

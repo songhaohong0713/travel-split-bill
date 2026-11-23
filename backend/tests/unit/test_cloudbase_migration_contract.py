@@ -215,8 +215,10 @@ def test_placeholder_migration_keeps_the_projection_guard_and_the_accept_functio
         1
     ].split("$$;", 1)[0]
     # Settlement rows first, then the ledger state the trigger compares them with.
-    assert claim.index("UPDATE payment_records") < claim.index("UPDATE trip_ledgers")
-    assert claim.index("UPDATE trip_ledgers") < claim.index("DELETE FROM users")
+    assert claim.index("UPDATE payment_records") < claim.index(
+        "INSERT INTO trip_ledgers"
+    )
+    assert claim.index("INSERT INTO trip_ledgers") < claim.index("DELETE FROM users")
     assert "IS DISTINCT FROM p_expected" in claim
     create = statements.split("FUNCTION public.tsb_create_trip_invite", 1)[1].split(
         "$$;", 1

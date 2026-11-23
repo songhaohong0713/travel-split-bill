@@ -101,7 +101,11 @@ BEGIN
     END LOOP;
   END LOOP;
   -- A snapshot read before the claim must not be written back afterwards.
-  UPDATE trip_ledgers SET state_json=p_state, revision=revision+1 WHERE trip_id=v_trip_id;
+  -- p_state is null only for a trip that has no ledger row and needs none.
+  IF p_state IS NOT NULL THEN
+    INSERT INTO trip_ledgers(trip_id, revision, state_json) VALUES (v_trip_id, 1, p_state)
+    ON CONFLICT (trip_id) DO UPDATE SET state_json=p_state, revision=trip_ledgers.revision+1;
+  END IF;
   -- Foreign keys abort everything if any row still names the placeholder.
   DELETE FROM users WHERE id=p_placeholder_id;
   RETURN jsonb_build_object('id', v_trip_id, 'name', v_check->>'name', 'default_currency', v_check->>'default_currency', 'member_count', (SELECT count(*) FROM trip_members WHERE trip_id=v_trip_id));
