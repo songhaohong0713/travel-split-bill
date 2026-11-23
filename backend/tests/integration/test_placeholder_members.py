@@ -617,13 +617,10 @@ def test_claim_does_not_hand_other_members_someone_else_to_pay(ledger):
     after = ledger_people(c, base, "a")
     # What people are asked to pay, and can act on, is unchanged.
     assert after["open"] == before["open"]
-    assert [
+    assert sorted(
         (t["from_participant_id"], t["to_participant_id"], t["amount"], t["status"])
         for t in view(c, base)[1][D1]["transfers"]
-    ] == [("c", "b", "100.00", "pending"), (claimer, "a", "100.00", "pending")] or [
-        (t["from_participant_id"], t["to_participant_id"])
-        for t in view(c, base)[1][D1]["transfers"]
-    ] == sorted((f, t) for f, t, _ in before["open"])
+    ) == [("c", "b", "100.00", "pending"), (claimer, "a", "100.00", "pending")]
     # A day's own `pending` list is paired afresh in id order on every read,
     # so with equal amounts it may pair differently; nets and balances do not.
     for day in (before, after):
