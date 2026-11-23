@@ -33,7 +33,7 @@ from app.core.ledger import (
     snapshot_token,
     trip_today,
 )
-from app.db.ledger_reads import member_snapshots
+from app.db.ledger_reads import cadence_snapshot, member_snapshots
 from app.db.models import ExpenseRecord, TripLedger, TripMember
 from app.db.payment_projection import sync_payments
 from app.providers.cloudbase_pg import (
@@ -210,6 +210,7 @@ async def snapshot(trip_id, request, session, user_id):
     return {
         "currency": trip.default_currency,
         "timezone_offset_minutes": trip.timezone_offset_minutes,
+        **cadence_snapshot(trip),
         "members": members,
         "revision": ledger.revision if ledger else 0,
         "state": deepcopy(ledger.state_json) if ledger else {"payments": []},

@@ -22,6 +22,12 @@ from app.core.business_time import (
     business_today,
     client_timezone_offset,  # noqa: F401 - compatibility re-export
 )
+from app.core.cadence import (
+    CADENCE_DAILY,
+    CADENCE_TRIP,
+    SNAPSHOT_CADENCE,
+    SNAPSHOT_END_DATE,
+)
 from app.core.money import quantized_money
 from app.core.settlement import minimum_transfers
 
@@ -60,6 +66,28 @@ def trip_today(snapshot, now=None):
     if offset is None:
         offset = DEFAULT_TIMEZONE_OFFSET_MINUTES
     return ((now or datetime.now(UTC)) - timedelta(minutes=offset)).date().isoformat()
+
+
+def awaits_trip_end(snapshot, today):
+    """Whether a trip settled as a whole is still before its settlement day.
+
+    Settlement opens the day after the end date, like a day opens the day
+    after it. Without an end date there is no such day, so it stays closed.
+    A snapshot without the key, as older SQL returns it, is a daily trip.
+    """
+    if snapshot.get(SNAPSHOT_CADENCE, CADENCE_DAILY) != CADENCE_TRIP:
+        return False
+    end = snapshot.get(SNAPSHOT_END_DATE)
+    return end is None or today <= end
+
+
+def _trip_end_message(snapshot):
+    end = snapshot.get(SNAPSHOT_END_DATE)
+    return (
+        f"这段旅行是整趟结，{end} 结束后才能结清"
+        if end
+        else "这段旅行是整趟结，请旅行创建者先设置结束日期"
+    )
 
 
 def _raw_days(snapshot, records=None):
@@ -252,6 +280,7 @@ def project(snapshot):
                 net = balances[day].setdefault(currency, {})
                 net[member] = net.get(member, Decimal(0)) - value
     today = trip_today(snapshot)
+    held = awaits_trip_end(snapshot, today)
     for day, currency, member in frozen:
         balances.setdefault(day, {}).setdefault(currency, {})[member] = Decimal(0)
     for (day, currency, member), original in sorted(frozen.items()):
@@ -338,20 +367,25 @@ def project(snapshot):
             for member, value in sorted(net.items())
             if value
         ]
+        row["settled_transfers"] = [
+            p for p in active if any(d == day for d, _, _ in _deductions(members, p))
+        ]
         # A member can hold a balance no transfer can match yet, so the day
-        # is judged by balances, not by whether a transfer exists.
+        # is judged by balances, not by whether a transfer exists. While a
+        # trip settled as a whole has not ended, only a day that was already
+        # settled and still owes nothing keeps showing as settled.
+        recording = day >= today or (
+            held and (row["balances"] or not row["settled_transfers"])
+        )
         row["status"] = (
             "invalid"
             if row["error"]
             else "recording"
-            if day >= today
+            if recording
             else "pending"
             if row["balances"]
             else "settled"
         )
-        row["settled_transfers"] = [
-            p for p in active if any(d == day for d, _, _ in _deductions(members, p))
-        ]
         days.append(row)
     return {
         "days": days,
@@ -591,16 +625,24 @@ def _currency_scope(snapshot, by_date, currency, net):
 
 
 def _selected_days(snapshot, requested_dates, ledger):
+    today = trip_today(snapshot)
+    held = awaits_trip_end(snapshot, today)
     selected = (
         sorted(set(requested_dates))
         if requested_dates is not None
         else sorted(d["date"] for d in ledger["days"] if d["status"] != "recording")
     )
     if not selected:
-        raise ValueError("今天的账单明天才能结清")
+        raise ValueError(
+            _trip_end_message(snapshot) if held else "今天的账单明天才能结清"
+        )
     by_date = {d["date"]: d for d in ledger["days"]}
-    if any(day >= trip_today(snapshot) for day in selected):
+    if any(day >= today for day in selected):
         raise ValueError("今天仍在记录中，不能结清")
+    if held and any(
+        day in by_date and by_date[day]["status"] == "recording" for day in selected
+    ):
+        raise ValueError(_trip_end_message(snapshot))
     if any(
         day not in by_date or by_date[day]["status"] in ("recording", "invalid")
         for day in selected

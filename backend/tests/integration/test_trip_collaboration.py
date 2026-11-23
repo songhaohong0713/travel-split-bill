@@ -55,6 +55,7 @@ def test_invited_user_can_join_list_and_edit_trip(client: TestClient) -> None:
             "timezone_offset_minutes": 0,
             "start_date": None,
             "end_date": None,
+            "settlement_cadence": "daily",
             "member_count": 2,
             "is_owner": False,
         }

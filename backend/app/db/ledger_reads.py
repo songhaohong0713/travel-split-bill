@@ -2,7 +2,22 @@ from copy import deepcopy
 
 from sqlalchemy import select
 
+from app.core.cadence import CADENCE_TRIP, SNAPSHOT_CADENCE, SNAPSHOT_END_DATE
 from app.db.models import ExpenseRecord, Trip, TripLedger, TripMember
+
+
+def cadence_snapshot(trip):
+    """The two snapshot keys that decide when a trip's days may be settled.
+
+    Same keys and values as the SQL tsb_ledger_snapshot: the end date is an
+    ISO string, and present only under the trip cadence so that editing the
+    dates of a daily trip leaves its previews valid.
+    """
+    whole = trip.settlement_cadence == CADENCE_TRIP
+    return {
+        SNAPSHOT_CADENCE: trip.settlement_cadence,
+        SNAPSHOT_END_DATE: str(trip.end_date) if whole and trip.end_date else None,
+    }
 
 
 def member_snapshots(session, user_id):
@@ -49,6 +64,7 @@ def member_snapshots(session, user_id):
             {
                 "currency": trip.default_currency,
                 "timezone_offset_minutes": trip.timezone_offset_minutes,
+                **cadence_snapshot(trip),
                 "members": members[trip.id],
                 "expenses": expenses[trip.id],
                 "revision": ledgers[trip.id].revision if trip.id in ledgers else 0,
